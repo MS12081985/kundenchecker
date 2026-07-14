@@ -1,0 +1,12 @@
+PySide6
+pandas
+openpyxl
+sqlalchemy
+requests
+beautifulsoup4
+lxml
+rapidfuzz
+python-dotenv
+loguru
+playwright
+pytest
