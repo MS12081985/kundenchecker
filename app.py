@@ -1,10 +1,21 @@
 import sys
+
 from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
 
-app = QApplication(sys.argv)
+from controllers.application_controller import ApplicationController
 
-window = MainWindow()
-window.show()
 
-sys.exit(app.exec())
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("KundenChecker")
+    app.setOrganizationName("MS Software")
+
+    controller = ApplicationController()
+    controller.quit_requested.connect(app.quit)
+    controller.start()
+
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

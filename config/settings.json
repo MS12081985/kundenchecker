@@ -1,0 +1,22 @@
+{
+  "general": {
+    "remember_export_directory": false,
+    "save_window_size": false,
+    "restore_window_size": false
+  },
+  "research": {
+    "timeout": 15,
+    "auto_save_sqlite": true
+  },
+  "export": {
+    "directory": "/Users/marcspringer/Projekte/kundenchecker/exports",
+    "format": "xlsx"
+  },
+  "appearance": {
+    "theme": "system"
+  },
+  "window": {
+    "width": 1500,
+    "height": 900
+  }
+}

@@ -1,0 +1,2 @@
+"""Typisierte Datenmodelle der Anwendung."""
+

@@ -1,0 +1,1 @@
+"""Controller der KundenChecker-Anwendung."""
