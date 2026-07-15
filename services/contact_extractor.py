@@ -2,16 +2,10 @@ import re
 import json
 from urllib.parse import urljoin
 
-import requests
-import urllib3
-from bs4 import BeautifulSoup
 from loguru import logger
 
 from config.app_config import AppConfig
 from services.contact_validator import choose_email, choose_phone
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 
 class ContactExtractor:
     """Durchsucht begrenzt Website-, Kontakt- und Impressumsseiten."""
@@ -71,6 +65,9 @@ class ContactExtractor:
         return result
 
     def download(self, url: str):
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         try:
             response = requests.get(
                 url,
@@ -90,6 +87,7 @@ class ContactExtractor:
             return ""
 
     def find_contact_pages(self, website, html):
+        from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, "lxml")
         links = []
         keywords = AppConfig.CONTACT_PAGE_KEYWORDS
@@ -108,6 +106,7 @@ class ContactExtractor:
         return pages[0] if pages else ""
 
     def extract_candidates_from_html(self, html, page_url=""):
+        from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, "lxml")
         for element in soup(["script", "style", "noscript", "template"]):
             element.extract()

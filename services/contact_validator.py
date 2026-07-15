@@ -9,9 +9,6 @@ import re
 import unicodedata
 
 from loguru import logger
-import phonenumbers
-from phonenumbers import PhoneNumberFormat, PhoneNumberType
-
 from config.app_config import AppConfig
 
 
@@ -52,6 +49,8 @@ def _clean_phone(value) -> str:
 
 def validate_phone_details(value, *, region=None, source="", context="", require_context=False) -> PhoneValidation:
     """Validate and normalize one candidate without guessing a local area code."""
+    import phonenumbers
+    from phonenumbers import PhoneNumberFormat, PhoneNumberType
     raw = _clean_phone(value)
     digits = re.sub(r"\D", "", raw)
     if not raw:

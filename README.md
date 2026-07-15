@@ -2,6 +2,14 @@
 
 KundenChecker ist eine Desktop-Anwendung auf Basis von **Python** und **PySide6**.
 
+Pro angemeldetem Benutzer läuft nur eine App-Instanz; ein erneuter Start holt
+die bereits geöffnete Anwendung in den Vordergrund.
+
+Die optionale Updateprüfung benötigt Internetzugang und verwendet die
+öffentliche GitHub-Releases-API. KundenChecker funktioniert weiterhin
+vollständig offline. Heruntergeladene Updates werden nicht automatisch
+installiert; die Installation erfolgt weiterhin manuell.
+
 Die Anwendung dient dazu, Kundendaten aus Excel-Dateien einzulesen, zu durchsuchen, Dubletten zu erkennen und Firmen automatisch im Internet zu recherchieren.
 
 ---
@@ -95,7 +103,7 @@ python app.py
 
 Aktuelle Version:
 
-**v1.2.1**
+**v1.2.2**
 
 ---
 
@@ -207,6 +215,13 @@ Statusfilter werden innerhalb der aktuellen Suche und der vorhandenen
 Kundenfilter angewendet. CRM-Felder können ein- oder ausgeschlossen werden;
 interne Schlüssel werden standardmäßig nicht exportiert. Unterstützt werden
 formatierte Excel-Arbeitsmappen und CSV-Dateien mit UTF-8-BOM.
+
+## Schneller Anwendungsstart (1.2.2)
+
+Beim Start zeigt KundenChecker unmittelbar einen Splash Screen mit dem aktuellen
+Initialisierungsstatus. Das Hauptfenster erscheint anschließend automatisch;
+Recherche-, Export- und selten verwendete Dialogmodule werden erst bei Bedarf
+geladen.
 
 ## Bekannte Einschränkung
 

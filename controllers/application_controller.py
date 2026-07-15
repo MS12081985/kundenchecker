@@ -1,29 +1,19 @@
 from pathlib import Path
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 from loguru import logger
 
-from excel.importer import load_excel
 from config.app_config import AppConfig
 from config.settings import Settings
-from services.customer_service import CustomerService
-from services.duplicate_service import DuplicateService
-from services.research_service import ResearchService
 from services.license_service import LicenseService
-from services.crm_service import CRMService
 from services.maps_service import build_maps_url
-from services.phone_cleanup_service import PhoneCleanupService
-from services.deduplication_service import DeduplicationService
-from services.customer_export_service import CustomerExportService
 from ui.main_window import MainWindow
-from workers.research_worker import ResearchWorker
 from models.research_report import ResearchError, ResearchReport, build_change
 from models.dashboard_data import DashboardData
 import json
-import pandas as pd
 import shutil
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QProgressDialog
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
 
@@ -56,7 +46,7 @@ class ApplicationController(QObject):
     report_dialog_requested = Signal(object)
     dashboard_data_changed = Signal(object)
     page_changed = Signal(int)
-    start_dialog_requested = Signal()
+    start_dialog_requested = Signal(object)
     license_dialog_requested = Signal(object)
     excel_file_dialog_requested = Signal()
     crm_data_changed = Signal(object)
@@ -64,20 +54,41 @@ class ApplicationController(QObject):
     crm_history_dialog_requested = Signal(object)
     reports_data_changed = Signal(object)
     report_changes_changed = Signal(object)
+    main_window_visible = Signal()
+    about_dialog_requested = Signal(object)
+    update_dialog_requested = Signal(object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, startup_profiler=None, startup_status=None):
         super().__init__(parent)
+        self._startup_profiler = startup_profiler
+        self._startup_status = startup_status or (lambda _message: None)
 
-        self.window = MainWindow()
+        self._startup_status("Einstellungen werden geladen …")
         self.settings_store = Settings()
         self.settings = self.settings_store.load()
+        self._clean_recent_files()
+        self._mark_startup("Einstellungen geladen")
         # Der Recherche-Service liest diese zentrale Laufzeitkonfiguration.
         AppConfig.REQUEST_TIMEOUT = int(self.settings["research"].get("timeout", AppConfig.REQUEST_TIMEOUT))
-        self.customer_service = CustomerService()
-        self.research_service = ResearchService()
+
+        self._startup_status("Lizenz wird geprüft …")
         self.license_service = LicenseService()
+        self._license_validation = self.license_service.validate()
+        self._mark_startup("Lizenz geprüft")
+
+        self._startup_status("Datenbank wird vorbereitet …")
+        from services.crm_service import CRMService
         self.crm_service = CRMService()
-        self.customer_export_service = CustomerExportService()
+        self._mark_startup("Datenbank initialisiert")
+        self._create_daily_database_backup()
+
+        self._startup_status("Oberfläche wird geladen …")
+        self.window = MainWindow()
+        self._mark_startup("MainWindow erzeugt")
+        self._mark_startup("Dashboard erzeugt")
+        self._customer_service = None
+        self._research_service = None
+        self._customer_export_service = None
         self._current_dataframe = None
         self._selected_customer = None
         self._selected_customers = []
@@ -87,13 +98,120 @@ class ApplicationController(QObject):
         self._cancel_requested = False
         self._pending_research_worklist = None
         self._last_research_report = self._load_last_report()
+        self._mark_startup("Letzter Bericht geladen")
         self._report_filter = "all"
         self._editing_activity_id = None
         self._crm_filter = {"stage": "Alle Kundenstatus", "priority": "Alle Prioritäten", "tag": ""}
         self._show_followups_only = False
         self._pending_customer_export = None
+        self._update_thread = None
+        self._update_worker = None
+        self._update_check_manual = False
+        self._download_thread = None
+        self._download_worker = None
+        self._download_progress = None
+        self._download_information = None
 
         self._connect_signals()
+
+    def _mark_startup(self, label):
+        if self._startup_profiler is not None:
+            return self._startup_profiler.mark(label)
+        return None
+
+    def _recent_files(self):
+        return list(self.settings["general"].get("recent_excel_files", []))
+
+    def _clean_recent_files(self):
+        from services.recent_files_service import RecentFilesService
+
+        before = self.settings["general"].get("recent_excel_files", [])
+        cleaned = RecentFilesService.clean(before)
+        if cleaned != before:
+            settings = Settings.normalize(self.settings)
+            settings["general"]["recent_excel_files"] = cleaned
+            try:
+                self.settings = self.settings_store.save(settings)
+            except OSError:
+                logger.exception("Zuletzt verwendete Dateien konnten nicht bereinigt werden")
+
+    def _remember_excel_file(self, filename):
+        from services.recent_files_service import RecentFilesService
+
+        settings = Settings.normalize(self.settings)
+        settings["general"]["recent_excel_files"] = RecentFilesService.add(
+            self._recent_files(), filename
+        )
+        try:
+            self.settings = self.settings_store.save(settings)
+        except OSError:
+            logger.exception("Zuletzt verwendete Excel-Datei konnte nicht gespeichert werden")
+
+    def _create_daily_database_backup(self):
+        try:
+            from services.database_backup_service import DatabaseBackupService
+
+            backup = DatabaseBackupService(
+                self.crm_service.database.db_path, AppConfig.AUTOMATIC_BACKUP_DIR
+            ).create_daily_backup()
+            if backup:
+                logger.info("Automatisches Datenbank-Backup bereit: {}", backup)
+        except Exception as error:
+            logger.exception("Automatisches Datenbank-Backup fehlgeschlagen: {}", error)
+
+    @Slot()
+    def open_log_directory(self):
+        from services.diagnostics_service import DiagnosticsService
+
+        if not DiagnosticsService.open_directory(AppConfig.LOG_DIR):
+            self.error_requested.emit("Diagnose", "Der Logordner konnte nicht geöffnet werden.")
+
+    @Slot()
+    def open_user_data_directory(self):
+        from services.diagnostics_service import DiagnosticsService
+
+        if not DiagnosticsService.open_directory(AppConfig.RUNTIME_DIR):
+            self.error_requested.emit(
+                "Diagnose", "Der Benutzerdatenordner konnte nicht geöffnet werden."
+            )
+
+    @Slot()
+    def copy_system_information(self):
+        from services.diagnostics_service import DiagnosticsService
+
+        text = DiagnosticsService.system_information(self.license_service.status())
+        QApplication.clipboard().setText(text)
+        self.status_changed.emit("Systeminformationen kopiert.")
+
+    @Slot()
+    def show_about(self):
+        from services.diagnostics_service import DiagnosticsService
+
+        information = DiagnosticsService.about_information(
+            self.license_service.status(), self.crm_service.database.db_path
+        )
+        self.about_dialog_requested.emit(information)
+
+    @property
+    def customer_service(self):
+        if self._customer_service is None:
+            from services.customer_service import CustomerService
+            self._customer_service = CustomerService()
+        return self._customer_service
+
+    @property
+    def research_service(self):
+        if self._research_service is None:
+            from services.research_service import ResearchService
+            self._research_service = ResearchService(database=self.crm_service.database)
+        return self._research_service
+
+    @property
+    def customer_export_service(self):
+        if self._customer_export_service is None:
+            from services.customer_export_service import CustomerExportService
+            self._customer_export_service = CustomerExportService()
+        return self._customer_export_service
 
     def _connect_signals(self):
         self.window.excel_file_selected.connect(self.load_excel_file)
@@ -145,6 +263,14 @@ class ApplicationController(QObject):
         self.window.crm_activity_submitted.connect(self.save_activity)
         self.window.crm_activity_edit_requested.connect(self.edit_activity)
         self.window.crm_activity_delete_requested.connect(self.delete_activity)
+        self.window.log_directory_requested.connect(self.open_log_directory)
+        self.window.user_data_directory_requested.connect(self.open_user_data_directory)
+        self.window.system_information_requested.connect(self.copy_system_information)
+        self.window.about_requested.connect(self.show_about)
+        self.window.update_check_requested.connect(self.check_updates_manually)
+        self.window.update_release_requested.connect(self.open_update_release)
+        self.window.update_download_requested.connect(self.download_update)
+        self.window.update_skip_requested.connect(self.skip_update_version)
 
         self.customers_changed.connect(self.window.set_customers)
         self.customer_details_changed.connect(self.window.set_customer_details)
@@ -180,6 +306,8 @@ class ApplicationController(QObject):
         self.window_requested.connect(self.window.show)
         self.start_dialog_requested.connect(self.window.show_start_dialog)
         self.license_dialog_requested.connect(self.window.show_license_dialog)
+        self.about_dialog_requested.connect(self.window.show_about_dialog)
+        self.update_dialog_requested.connect(self.window.show_update_dialog)
         self.excel_file_dialog_requested.connect(self.window._select_excel_file)
 
     def start(self):
@@ -188,13 +316,215 @@ class ApplicationController(QObject):
             self.window_size_restore_requested.emit(window["width"], window["height"])
         self.splitter_restore_requested.emit(self.settings["ui"]["customer_splitter_sizes"])
         self.status_changed.emit("Bereit")
-        self._update_dashboard()
         self.show_dashboard()
         logger.info("Dashboard geöffnet")
         self.window_requested.emit()
-        self.start_dialog_requested.emit()
-        if not self.license_service.validate()[0]:
+        self._mark_startup("Hauptfenster sichtbar")
+        self.main_window_visible.emit()
+        QTimer.singleShot(0, self._show_startup_dialogs)
+
+    def _show_startup_dialogs(self):
+        elapsed = self._mark_startup("Startdialog sichtbar")
+        if elapsed is not None:
+            logger.info("Startprofil: {:<32} {:>8.3f} s", "Startdialog sichtbar", elapsed)
+        self.start_dialog_requested.emit(self._recent_files())
+        if not self._license_validation[0]:
             self.license_dialog_requested.emit(self.license_service.status())
+        QTimer.singleShot(0, self._maybe_check_updates_automatically)
+
+    def _automatic_update_check_due(self, now=None):
+        if not self.settings["general"].get("check_updates_on_start", True):
+            return False
+        now = now or datetime.now()
+        value = self.settings["general"].get("last_update_check", "")
+        if not value:
+            return True
+        try:
+            return now - datetime.fromisoformat(value) >= timedelta(hours=24)
+        except (TypeError, ValueError):
+            return True
+
+    @Slot()
+    def _maybe_check_updates_automatically(self):
+        if self._automatic_update_check_due():
+            self._start_update_check(manual=False)
+
+    @Slot()
+    def check_updates_manually(self):
+        self._start_update_check(manual=True)
+
+    def _start_update_check(self, manual):
+        if self._update_thread is not None:
+            if manual:
+                self.status_changed.emit("Updateprüfung läuft bereits …")
+            return
+        if not manual:
+            settings = Settings.normalize(self.settings)
+            settings["general"]["last_update_check"] = datetime.now().isoformat(
+                timespec="seconds"
+            )
+            try:
+                self.settings = self.settings_store.save(settings)
+            except OSError:
+                logger.exception("Zeitpunkt der Updateprüfung konnte nicht gespeichert werden")
+        from workers.update_worker import UpdateCheckWorker
+
+        self._update_check_manual = manual
+        self._update_thread = QThread(self)
+        self._update_worker = UpdateCheckWorker()
+        self._update_worker.moveToThread(self._update_thread)
+        self._update_thread.started.connect(self._update_worker.run)
+        self._update_worker.finished.connect(self._on_update_check_finished)
+        self._update_worker.finished.connect(self._update_thread.quit)
+        self._update_worker.finished.connect(self._update_worker.deleteLater)
+        self._update_thread.finished.connect(self._cleanup_update_check)
+        self.status_changed.emit("Suche nach Updates …")
+        self._update_thread.start()
+
+    @Slot(object)
+    def _on_update_check_finished(self, information):
+        manual = self._update_check_manual
+        if information.error_message:
+            logger.warning("Updateprüfung fehlgeschlagen: {}", information.error_message)
+            if manual:
+                self.error_requested.emit("Updateprüfung", information.error_message)
+            return
+        skipped = self.settings["general"].get("skipped_update_version", "")
+        if information.update_available and (manual or information.latest_version != skipped):
+            self.update_dialog_requested.emit(information)
+        elif manual:
+            self.information_requested.emit(
+                "Updateprüfung",
+                f"Sie verwenden bereits die aktuelle Version {information.current_version}.",
+            )
+        elif not information.update_available:
+            self.status_changed.emit("KundenChecker ist aktuell.")
+        else:
+            self.status_changed.emit("Updateprüfung abgeschlossen.")
+
+    @Slot()
+    def _cleanup_update_check(self):
+        if self._update_thread is not None:
+            self._update_thread.deleteLater()
+        self._update_thread = None
+        self._update_worker = None
+
+    @Slot(str)
+    def skip_update_version(self, version):
+        settings = Settings.normalize(self.settings)
+        settings["general"]["skipped_update_version"] = str(version)
+        try:
+            self.settings = self.settings_store.save(settings)
+        except OSError:
+            logger.exception("Übersprungene Updateversion konnte nicht gespeichert werden")
+
+    @Slot(str)
+    def open_update_release(self, url):
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
+    @Slot(object)
+    def download_update(self, information):
+        if self._download_thread is not None:
+            return
+        target, _ = QFileDialog.getSaveFileName(
+            self.window,
+            "Update herunterladen",
+            str(Path.home() / "Downloads" / information.asset_name),
+            "Alle Dateien (*)",
+        )
+        if not target:
+            return
+        from workers.update_worker import UpdateDownloadWorker
+
+        self._download_thread = QThread(self)
+        self._download_information = information
+        self._download_worker = UpdateDownloadWorker(information, target)
+        self._download_worker.moveToThread(self._download_thread)
+        self._download_progress = QProgressDialog(
+            "Update wird heruntergeladen …", "Abbrechen", 0, max(0, information.asset_size), self.window
+        )
+        self._download_progress.setWindowTitle("Update herunterladen")
+        self._download_progress.setAutoClose(False)
+        self._download_progress.canceled.connect(lambda: setattr(self._download_worker, "_cancelled", True))
+        self._download_worker.progress.connect(self._on_update_download_progress)
+        self._download_worker.finished.connect(self._on_update_download_finished)
+        self._download_worker.error.connect(self._on_update_download_error)
+        self._download_worker.cancelled.connect(self._on_update_download_cancelled)
+        for signal in (
+            self._download_worker.finished,
+            self._download_worker.error,
+            self._download_worker.cancelled,
+        ):
+            signal.connect(self._download_thread.quit)
+            signal.connect(self._download_worker.deleteLater)
+        self._download_thread.finished.connect(self._cleanup_update_download)
+        self._download_thread.started.connect(self._download_worker.run)
+        self._download_progress.show()
+        self._download_thread.start()
+
+    @Slot(int, int)
+    def _on_update_download_progress(self, received, total):
+        if self._download_progress is None:
+            return
+        if total:
+            self._download_progress.setMaximum(total)
+            self._download_progress.setValue(received)
+
+    @Slot(object)
+    def _on_update_download_finished(self, result):
+        if self._download_progress is not None:
+            self._download_progress.close()
+        verification = (
+            "SHA-256-Prüfsumme bestätigt."
+            if result.checksum_verified
+            else "Keine Prüfsumme veröffentlicht."
+        )
+        box = QMessageBox(self.window)
+        box.setWindowTitle("Update heruntergeladen")
+        box.setText(f"Das Update wurde heruntergeladen.\n{result.path}\n\n{verification}")
+        folder = box.addButton("Im Finder/Explorer anzeigen", QMessageBox.ActionRole)
+        release = box.addButton("Release-Seite öffnen", QMessageBox.ActionRole)
+        box.addButton("Schließen", QMessageBox.AcceptRole)
+        box.exec()
+        if box.clickedButton() is folder:
+            from services.diagnostics_service import DiagnosticsService
+
+            DiagnosticsService.open_directory(result.path.parent)
+        elif box.clickedButton() is release:
+            if self._download_information and self._download_information.release_url:
+                QDesktopServices.openUrl(QUrl(self._download_information.release_url))
+
+    @Slot(str)
+    def _on_update_download_error(self, message):
+        if self._download_progress is not None:
+            self._download_progress.close()
+        self.error_requested.emit("Update herunterladen", message)
+
+    @Slot()
+    def _on_update_download_cancelled(self):
+        if self._download_progress is not None:
+            self._download_progress.close()
+        self.status_changed.emit("Update-Download abgebrochen.")
+
+    @Slot()
+    def _cleanup_update_download(self):
+        if self._download_thread is not None:
+            self._download_thread.deleteLater()
+        self._download_thread = None
+        self._download_worker = None
+        self._download_progress = None
+        self._download_information = None
+
+    @Slot()
+    def shutdown_background_tasks(self):
+        """Finish short-lived update workers before QObject teardown."""
+        if self._download_worker is not None:
+            self._download_worker._cancelled = True
+        for thread in (self._download_thread, self._update_thread):
+            if thread is not None and thread.isRunning():
+                thread.quit()
+                thread.wait(6_000)
 
     @Slot(str)
     def load_license(self, filename):
@@ -306,6 +636,7 @@ class ApplicationController(QObject):
             if df is None:
                 data = DashboardData()
             else:
+                import pandas as pd
                 def missing(column):
                     if column not in df.columns:
                         return pd.Series(True, index=df.index)
@@ -448,6 +779,7 @@ class ApplicationController(QObject):
     def load_excel_file(self, filename):
         logger.info("Schnellaktion Excel öffnen ausgelöst")
         try:
+            from excel.importer import load_excel
             dataframe = load_excel(filename)
         except Exception as error:
             self.error_requested.emit("Excel-Import", str(error))
@@ -469,6 +801,7 @@ class ApplicationController(QObject):
         self.visible_count_changed.emit(len(self._current_dataframe), len(self._current_dataframe))
         self.show_customers()
         self._update_dashboard()
+        self._remember_excel_file(filename)
         self.status_changed.emit("Excel-Datei geladen.")
 
     @Slot(str)
@@ -504,6 +837,7 @@ class ApplicationController(QObject):
         dataframe = self.customer_service.search(self._active_search_text)
         if dataframe is None or dataframe.empty:
             return dataframe
+        import pandas as pd
         stage = self._crm_filter.get("stage", "Alle Kundenstatus")
         priority = self._crm_filter.get("priority", "Alle Prioritäten")
         tag = self._crm_filter.get("tag", "").casefold()
@@ -685,6 +1019,8 @@ class ApplicationController(QObject):
 
     @Slot()
     def find_duplicates(self):
+        from services.deduplication_service import DeduplicationService
+        from services.duplicate_service import DuplicateService
         service = DeduplicationService(database=self.crm_service.database)
         groups = service.groups()
         if not groups:
@@ -726,6 +1062,7 @@ class ApplicationController(QObject):
 
     @Slot()
     def revalidate_phone_numbers(self):
+        from services.phone_cleanup_service import PhoneCleanupService
         service = PhoneCleanupService(database=self.crm_service.database)
         try:
             items = service.preview()
@@ -1068,6 +1405,7 @@ class ApplicationController(QObject):
         if self._thread is not None:
             return
 
+        from workers.research_worker import ResearchWorker
         self._thread = QThread(self)
         self._worker = ResearchWorker(working_list, force_refresh=force_refresh)
         self._worker.moveToThread(self._thread)
@@ -1197,6 +1535,7 @@ class ApplicationController(QObject):
         if report is None:
             return
         try:
+            import pandas as pd
             changes = list(report.changes)
             if self._report_filter != "all":
                 self.set_report_filter(self._report_filter)

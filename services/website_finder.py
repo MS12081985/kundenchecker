@@ -1,6 +1,5 @@
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from ddgs import DDGS
 from loguru import logger
 
 
@@ -64,6 +63,7 @@ class WebsiteFinder:
         return cleaned
 
     def search(self, company_name: str, city: str = "") -> list[str]:
+        from ddgs import DDGS
 
         query = company_name.strip()
 

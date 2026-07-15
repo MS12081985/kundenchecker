@@ -22,8 +22,8 @@ class ResearchResult:
 
 
 class ResearchService:
-    def __init__(self):
-        self.database = Database()
+    def __init__(self, database=None):
+        self.database = database or Database()
         self.website_finder = WebsiteFinder()
         self.contact_extractor = ContactExtractor()
 

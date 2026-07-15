@@ -7,7 +7,6 @@ import math
 import re
 import unicodedata
 
-import pandas as pd
 from loguru import logger
 
 from database.database import Database
@@ -210,6 +209,7 @@ class CRMService:
 
     def merge_dataframe(self, dataframe: pd.DataFrame) -> pd.DataFrame:
         """Add CRM display columns while preserving the imported rows."""
+        import pandas as pd
         if dataframe is None or dataframe.empty:
             return dataframe
         result = dataframe.copy()

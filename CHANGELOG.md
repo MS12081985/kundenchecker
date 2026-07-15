@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.2
+
+- Automatische Updateprüfung nach dem sichtbaren Programmstart ergänzt.
+- Manuelle Updateprüfung über das Hilfe-Menü hinzugefügt.
+- Sicherer Download von Plattform-Assets über GitHub Releases mit optionaler SHA-256-Prüfung.
+- Startdialog um die letzten fünf erfolgreich geöffneten Excel-Dateien erweitert.
+- Hilfe-Menü um Diagnoseordner, kopierbare Systeminformationen und Über-Dialog ergänzt.
+- Tägliche, auf zehn Stände begrenzte automatische SQLite-Backups hinzugefügt.
+- Mehrfachstart verhindert; vorhandene Instanz wird aktiviert.
+- Lizenzgenerator um unbegrenzte, feste und tageweise Gültigkeit mit Vorschau erweitert.
+- Ablaufstatus, deutsches Ablaufdatum und verbleibende Tage werden zentral ausgewertet.
+- Zeitlich unbegrenzte ältere Lizenzdateien ohne `expires_at` bleiben kompatibel.
+- Sofort sichtbarer Splash Screen mit echten Startstatusmeldungen.
+- Startprofilierung mit Zeitmarken für UI, Einstellungen, Lizenz und Datenbank.
+- Recherche-, Export- und seltene Dialogmodule werden erst bei Bedarf geladen.
+- Schwere Drittanbieterimporte aus dem unmittelbaren Startpfad entfernt.
+- Datenbankinstanz zwischen CRM und Recherche geteilt und doppelte Dashboard-Aktualisierung entfernt.
+- PyInstaller-Bundle um Test- und nicht verwendete Entwicklungsmodule bereinigt.
+
 ## 1.2.1
 
 - Kontrollierte, transaktionale Dubletten-Zusammenführung über stabile SQLite-IDs.

@@ -17,6 +17,10 @@ class Settings:
             "remember_export_directory": False,
             "save_window_size": False,
             "restore_window_size": False,
+            "recent_excel_files": [],
+            "check_updates_on_start": True,
+            "last_update_check": "",
+            "skipped_update_version": "",
         },
         "research": {
             "timeout": 15,
@@ -97,5 +101,13 @@ class Settings:
             and all(isinstance(value, int) and value > 0 for value in sizes)
         ):
             normalized["ui"]["customer_splitter_sizes"] = [65, 35]
+
+        recent = normalized["general"].get("recent_excel_files")
+        if not isinstance(recent, list):
+            normalized["general"]["recent_excel_files"] = []
+        else:
+            normalized["general"]["recent_excel_files"] = [
+                str(value) for value in recent if isinstance(value, str)
+            ][:5]
 
         return normalized

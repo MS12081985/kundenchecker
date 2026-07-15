@@ -38,9 +38,11 @@ class SettingsDialog(QDialog):
         self.restore_window_size = QCheckBox(
             "Beim Start letzte Fenstergröße wiederherstellen"
         )
+        self.check_updates_on_start = QCheckBox("Beim Start nach Updates suchen")
         general_layout.addWidget(self.remember_export_directory)
         general_layout.addWidget(self.save_window_size)
         general_layout.addWidget(self.restore_window_size)
+        general_layout.addWidget(self.check_updates_on_start)
         layout.addWidget(general_group)
 
         research_group = QGroupBox("Recherche", self)
@@ -99,6 +101,7 @@ class SettingsDialog(QDialog):
         self.remember_export_directory.setChecked(general["remember_export_directory"])
         self.save_window_size.setChecked(general["save_window_size"])
         self.restore_window_size.setChecked(general["restore_window_size"])
+        self.check_updates_on_start.setChecked(general["check_updates_on_start"])
         self.research_timeout.setValue(research["timeout"])
         self.auto_save_sqlite.setChecked(research["auto_save_sqlite"])
         self.export_directory.setText(export["directory"])
@@ -128,6 +131,10 @@ class SettingsDialog(QDialog):
                 "remember_export_directory": self.remember_export_directory.isChecked(),
                 "save_window_size": self.save_window_size.isChecked(),
                 "restore_window_size": self.restore_window_size.isChecked(),
+                "recent_excel_files": self._settings["general"].get("recent_excel_files", []),
+                "check_updates_on_start": self.check_updates_on_start.isChecked(),
+                "last_update_check": self._settings["general"].get("last_update_check", ""),
+                "skipped_update_version": self._settings["general"].get("skipped_update_version", ""),
             },
             "research": {
                 "timeout": self.research_timeout.value(),
@@ -141,6 +148,7 @@ class SettingsDialog(QDialog):
                 "theme": self.theme.currentData(),
             },
             "window": self._settings["window"],
+            "ui": self._settings["ui"],
         }
 
     @staticmethod

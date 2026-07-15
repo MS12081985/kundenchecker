@@ -5,11 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 import math
 
-import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill
-
-
 EXPORT_SCOPES = {
     "visible": None,
     "complete": {"vollständig"},
@@ -40,6 +35,7 @@ def normalize_status(value) -> str:
 class CustomerExportService:
     @staticmethod
     def select(dataframe, scope="visible", selected_keys=None):
+        import pandas as pd
         frame = dataframe.copy() if dataframe is not None else pd.DataFrame()
         if frame.empty:
             return frame
@@ -82,6 +78,8 @@ class CustomerExportService:
             dataframe.to_csv(path, index=False, encoding="utf-8-sig")
             return path
         dataframe.to_excel(path, index=False, engine="openpyxl")
+        from openpyxl import load_workbook
+        from openpyxl.styles import Font, PatternFill
         workbook = load_workbook(path); sheet = workbook.active
         fill = PatternFill("solid", fgColor="2F5597")
         for cell in sheet[1]:

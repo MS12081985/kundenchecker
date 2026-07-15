@@ -21,6 +21,8 @@ class LicenseEvaluation:
     license_data: dict
     used: int = 0
     remaining: int | None = None
+    expires_display: str = "Unbegrenzt"
+    remaining_days: int | None = None
 
     @property
     def valid(self):

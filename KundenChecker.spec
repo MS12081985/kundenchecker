@@ -1,6 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_submodules
 
 root = Path(SPECPATH)
 datas = [(str(root / "resources"), "resources")]
@@ -17,9 +16,28 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["playwright"],
+    excludes=["playwright", "pytest", "_pytest", "sqlalchemy"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="KundenChecker", debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False)
-app = BUNDLE(exe, name="KundenChecker.app", bundle_identifier="de.mssoftware.kundenchecker", info_plist={"CFBundleShortVersionString": "1.2.1", "CFBundleVersion": "1.2.1", "NSHighResolutionCapable": True})
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="KundenChecker",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+)
+collection = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="KundenChecker",
+)
+app = BUNDLE(collection, name="KundenChecker.app", bundle_identifier="de.mssoftware.kundenchecker", info_plist={"CFBundleShortVersionString": "1.2.2", "CFBundleVersion": "1.2.2", "NSHighResolutionCapable": True})

@@ -34,18 +34,7 @@ from ui.table_model import CustomerTableModel
 from ui.toolbar import Toolbar as MainToolbar
 from ui.dashboard import Dashboard
 from config.app_config import AppConfig
-from widgets.progress_dialog import ProgressDialog
-from widgets.research_filter_dialog import ResearchFilterDialog
-from widgets.settings_dialog import SettingsDialog
-from widgets.research_report_dialog import ResearchReportDialog
-from widgets.start_dialog import StartDialog
-from widgets.license_dialog import LicenseDialog
 from ui.reports_page import ReportsPage
-from widgets.crm_activity_dialog import CRMActivityDialog
-from widgets.crm_history_dialog import CRMHistoryDialog
-from widgets.phone_cleanup_dialog import PhoneCleanupDialog
-from widgets.duplicate_dialog import DuplicateDialog
-from widgets.customer_export_dialog import CustomerExportDialog
 
 
 class MainWindow(QMainWindow):
@@ -104,6 +93,14 @@ class MainWindow(QMainWindow):
     crm_activity_submitted = Signal(object)
     crm_activity_edit_requested = Signal(object)
     crm_activity_delete_requested = Signal(object)
+    log_directory_requested = Signal()
+    user_data_directory_requested = Signal()
+    system_information_requested = Signal()
+    about_requested = Signal()
+    update_check_requested = Signal()
+    update_release_requested = Signal(str)
+    update_download_requested = Signal(object)
+    update_skip_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -253,6 +250,11 @@ class MainWindow(QMainWindow):
         self.main_menu.marked_refresh_requested.connect(self.marked_refresh_requested)
         self.main_menu.inactive_refresh_requested.connect(self.inactive_refresh_requested)
         self.main_menu.report_requested.connect(self.report_requested)
+        self.main_menu.log_directory_requested.connect(self.log_directory_requested)
+        self.main_menu.user_data_directory_requested.connect(self.user_data_directory_requested)
+        self.main_menu.system_information_requested.connect(self.system_information_requested)
+        self.main_menu.about_requested.connect(self.about_requested)
+        self.main_menu.update_check_requested.connect(self.update_check_requested)
 
         self.main_toolbar.open_requested.connect(self._select_excel_file)
         self.main_toolbar.search_requested.connect(self.check_requested)
@@ -284,9 +286,11 @@ class MainWindow(QMainWindow):
         self.detail_panel.follow_up_done_requested.connect(self.follow_up_done_requested)
 
     def confirm_phone_cleanup(self, items):
+        from widgets.phone_cleanup_dialog import PhoneCleanupDialog
         return PhoneCleanupDialog(items, self).exec() == QDialog.Accepted
 
     def review_duplicates(self, groups):
+        from widgets.duplicate_dialog import DuplicateDialog
         dialog = DuplicateDialog(groups, self)
         return dialog.decisions if dialog.exec() == QDialog.Accepted else []
 
@@ -370,6 +374,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def show_customer_export_dialog(self, default_format):
+        from widgets.customer_export_dialog import CustomerExportDialog
         if self.customer_export_dialog is not None:
             self.customer_export_dialog.close()
             self.customer_export_dialog.deleteLater()
@@ -390,6 +395,7 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def show_research_report(self, report):
+        from widgets.research_report_dialog import ResearchReportDialog
         dialog = ResearchReportDialog(report, self)
         dialog.export_requested.connect(self._select_report_export_file)
         dialog.exec()
@@ -404,17 +410,40 @@ class MainWindow(QMainWindow):
 
     @Slot(object, object)
     def show_settings_dialog(self, settings, defaults):
+        from widgets.settings_dialog import SettingsDialog
         dialog = SettingsDialog(settings, defaults, self)
         dialog.settings_saved.connect(self.settings_changed)
         dialog.exec()
 
-    @Slot()
-    def show_start_dialog(self):
-        self.start_dialog = StartDialog(AppConfig.VERSION, self)
+    @Slot(object)
+    def show_start_dialog(self, recent_files):
+        from widgets.start_dialog import StartDialog
+        self.start_dialog = StartDialog(AppConfig.VERSION, recent_files, self)
         self.start_dialog.open_excel_requested.connect(self._start_open_excel)
         self.start_dialog.template_requested.connect(self._start_template)
         self.start_dialog.dashboard_requested.connect(self._start_dashboard)
+        self.start_dialog.recent_file_requested.connect(self._start_recent_file)
         self.start_dialog.exec()
+
+    def _start_recent_file(self, filename):
+        self.start_dialog.accept()
+        self.excel_file_selected.emit(filename)
+
+    @Slot(object)
+    def show_about_dialog(self, information):
+        from widgets.about_dialog import AboutDialog
+
+        AboutDialog(information, self).exec()
+
+    @Slot(object)
+    def show_update_dialog(self, information):
+        from widgets.update_dialog import UpdateDialog
+
+        dialog = UpdateDialog(information, self)
+        dialog.release_page_requested.connect(self.update_release_requested)
+        dialog.download_requested.connect(self.update_download_requested)
+        dialog.skip_requested.connect(self.update_skip_requested)
+        dialog.exec()
 
     def _start_open_excel(self):
         self.start_dialog.accept()
@@ -430,6 +459,7 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def show_license_dialog(self, status):
+        from widgets.license_dialog import LicenseDialog
         dialog = LicenseDialog(status, self)
         dialog.license_selected.connect(self.license_file_selected)
         dialog.exec()
@@ -538,12 +568,14 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def show_crm_activity_dialog(self, activity=None):
+        from widgets.crm_activity_dialog import CRMActivityDialog
         dialog = CRMActivityDialog(activity, self)
         dialog.activity_submitted.connect(self.crm_activity_submitted)
         dialog.exec()
 
     @Slot(object)
     def show_crm_history_dialog(self, activities):
+        from widgets.crm_history_dialog import CRMHistoryDialog
         dialog = CRMHistoryDialog(activities, self)
         dialog.add_requested.connect(self.crm_activity_requested)
         dialog.edit_requested.connect(self.crm_activity_edit_requested)
@@ -568,6 +600,7 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def show_progress_dialog(self, total):
+        from widgets.progress_dialog import ProgressDialog
         self.close_progress_dialog()
         self.progress_dialog = ProgressDialog(self)
         self.progress_dialog.progress.setValue(0)
@@ -591,6 +624,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def show_research_filter_dialog(self):
+        from widgets.research_filter_dialog import ResearchFilterDialog
         if self.research_filter_dialog is not None:
             self.research_filter_dialog.close()
             self.research_filter_dialog.deleteLater()

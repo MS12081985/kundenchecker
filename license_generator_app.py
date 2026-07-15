@@ -6,12 +6,11 @@ settings.  Key material is read for signing and is never copied or logged.
 
 import base64
 import json
-import re
 import uuid
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QDate, QSettings
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -22,12 +21,20 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QComboBox,
+    QDateEdit,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from services.license_service import PUBLIC_KEY_B64
+from license_tool.validity import (
+    DURATION_DAYS,
+    FIXED_DATE,
+    UNLIMITED,
+    build_expires_at,
+    format_german_date,
+)
 
 
 class GeneratorWindow(QMainWindow):
@@ -48,6 +55,19 @@ class GeneratorWindow(QMainWindow):
         self.output.setPlaceholderText("Zielpfad der Lizenzdatei (.kcl)")
         self.limit = QSpinBox()
         self.limit.setRange(0, 1_000_000)
+        self.validity = QComboBox()
+        self.validity.addItem("Unbegrenzt", UNLIMITED)
+        self.validity.addItem("Festes Ablaufdatum", FIXED_DATE)
+        self.validity.addItem("Dauer in Tagen", DURATION_DAYS)
+        self.expiry_date = QDateEdit()
+        self.expiry_date.setCalendarPopup(True)
+        self.expiry_date.setDisplayFormat("dd.MM.yyyy")
+        self.expiry_date.setMinimumDate(QDate.currentDate())
+        self.expiry_date.setDate(QDate.currentDate().addDays(30))
+        self.valid_days = QSpinBox()
+        self.valid_days.setRange(1, 3650)
+        self.valid_days.setValue(30)
+        self._validity_manually_changed = False
 
         saved_key = self._settings.value("private_key_path", "", type=str)
         if saved_key and Path(saved_key).is_file():
@@ -57,6 +77,9 @@ class GeneratorWindow(QMainWindow):
         form.addRow("Lizenznehmer", self.customer)
         form.addRow("Firma", self.company)
         form.addRow("Edition", self.edition)
+        form.addRow("Gültigkeit", self.validity)
+        form.addRow("Ablaufdatum", self.expiry_date)
+        form.addRow("Dauer (Tage)", self.valid_days)
 
         key_row = QWidget()
         key_layout = QHBoxLayout(key_row)
@@ -84,6 +107,49 @@ class GeneratorWindow(QMainWindow):
         layout.addLayout(form)
         layout.addWidget(create_button)
         self.setCentralWidget(root)
+        self.validity.currentIndexChanged.connect(self._update_validity_fields)
+        self.validity.activated.connect(self._mark_validity_manual)
+        self.edition.currentTextChanged.connect(self._apply_edition_default)
+        self._apply_edition_default(self.edition.currentText())
+
+    def _mark_validity_manual(self, _index):
+        self._validity_manually_changed = True
+
+    def _apply_edition_default(self, edition):
+        if self._validity_manually_changed:
+            return
+        mode = DURATION_DAYS if edition == "trial" else UNLIMITED
+        self.validity.setCurrentIndex(self.validity.findData(mode))
+        self._update_validity_fields()
+
+    def _update_validity_fields(self, _index=None):
+        mode = self.validity.currentData()
+        self.expiry_date.setEnabled(mode == FIXED_DATE)
+        self.valid_days.setEnabled(mode == DURATION_DAYS)
+
+    def _expires_at(self, issued_at):
+        selected = self.expiry_date.date()
+        fixed = date(selected.year(), selected.month(), selected.day())
+        return build_expires_at(
+            self.validity.currentData(),
+            issued_at,
+            fixed_date=fixed,
+            duration_days=self.valid_days.value(),
+        )
+
+    def _summary(self, data):
+        limit = data.get("max_researches")
+        return "\n".join(
+            (
+                f"Lizenznehmer: {data['customer_name']}",
+                f"Firma: {data.get('company_name') or '–'}",
+                f"Edition: {data['edition']}",
+                f"Ausgestellt am: {format_german_date(data['issued_at'])}",
+                f"Gültigkeit: {self.validity.currentText()}",
+                f"Gültig bis: {format_german_date(data.get('expires_at'))}",
+                f"Max. Recherchen: {'Unbegrenzt' if limit is None else limit}",
+            )
+        )
 
     def select_key(self):
         start = self.key.text().strip() or str(Path.home())
@@ -186,18 +252,36 @@ class GeneratorWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 return
 
+        issued_at = date.today()
+        try:
+            expires_at = self._expires_at(issued_at)
+        except ValueError as error:
+            QMessageBox.warning(self, "Lizenz", str(error))
+            return
+
         data = {
             "schema_version": 1,
             "license_id": str(uuid.uuid4()),
             "customer_name": self.customer.text().strip(),
             "company_name": self.company.text().strip(),
             "edition": self.edition.currentText(),
-            "issued_at": date.today().isoformat(),
+            "issued_at": issued_at.isoformat(),
+            "expires_at": expires_at,
             "application": "KundenChecker",
             "application_major_version": "1",
         }
         if self.limit.value():
             data["max_researches"] = self.limit.value()
+
+        answer = QMessageBox.question(
+            self,
+            "Lizenz prüfen",
+            f"Bitte prüfen Sie die Lizenzdaten:\n\n{self._summary(data)}\n\nLizenz erstellen?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
 
         try:
             data["signature"] = base64.b64encode(key.sign(self._canonical_payload(data))).decode("ascii")
@@ -214,7 +298,7 @@ class GeneratorWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Lizenz",
-            f"Lizenz erfolgreich erstellt und geprüft:\n{target}",
+            f"Lizenz erfolgreich erstellt und geprüft:\n{target}\n\n{self._summary(data)}",
         )
 
 

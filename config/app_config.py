@@ -13,7 +13,7 @@ class AppConfig:
     # --------------------------------------------------
 
     APP_NAME = "KundenChecker"
-    VERSION = "1.2.1"
+    VERSION = "1.2.2"
 
     WINDOW_WIDTH = 1500
     WINDOW_HEIGHT = 900
@@ -32,6 +32,8 @@ class AppConfig:
     RESOURCE_DIR = RESOURCE_ROOT / "resources"
     IMPORT_TEMPLATE = RESOURCE_DIR / "templates" / "KundenChecker_Importvorlage.xlsx"
     REPORT_DIR = RUNTIME_DIR / "reports"
+    LOG_DIR = RUNTIME_DIR / "logs"
+    LOG_FILE = LOG_DIR / "startup.log"
     ICON_DIR = BASE_DIR / "icons"
     SETTINGS_FILE = RUNTIME_DIR / "config" / "settings.json"
 
@@ -82,6 +84,10 @@ class AppConfig:
     DUPLICATE_THRESHOLD = 90
 
     BACKUP_DIR = USER_DATA_DIR / "backups"
+    AUTOMATIC_BACKUP_DIR = RUNTIME_DIR / "backups" / "automatic"
+
+    GITHUB_REPOSITORY_URL = "https://github.com/MS12081985/kundenchecker"
+    GITHUB_RELEASE_URL = f"{GITHUB_REPOSITORY_URL}/releases/tag/v{VERSION}"
 
     # --------------------------------------------------
     # Export

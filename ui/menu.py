@@ -24,6 +24,10 @@ class MainMenu(QObject):
     report_requested = Signal()
 
     about_requested = Signal()
+    log_directory_requested = Signal()
+    user_data_directory_requested = Signal()
+    system_information_requested = Signal()
+    update_check_requested = Signal()
 
     def __init__(self, window):
         super().__init__(window)
@@ -145,6 +149,22 @@ class MainMenu(QObject):
         # -------------------------------------------------
 
         help_menu = menubar.addMenu("&Hilfe")
+
+        log_action = QAction("Logordner öffnen", self)
+        log_action.triggered.connect(self.log_directory_requested.emit)
+        help_menu.addAction(log_action)
+
+        data_action = QAction("Benutzerdatenordner öffnen", self)
+        data_action.triggered.connect(self.user_data_directory_requested.emit)
+        help_menu.addAction(data_action)
+
+        system_action = QAction("Systeminformationen kopieren", self)
+        system_action.triggered.connect(self.system_information_requested.emit)
+        help_menu.addAction(system_action)
+        update_action = QAction("Nach Updates suchen", self)
+        update_action.triggered.connect(self.update_check_requested.emit)
+        help_menu.addAction(update_action)
+        help_menu.addSeparator()
 
         about_action = QAction(
             "Über KundenChecker",
