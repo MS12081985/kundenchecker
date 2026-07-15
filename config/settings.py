@@ -33,6 +33,9 @@ class Settings:
             "width": AppConfig.WINDOW_WIDTH,
             "height": AppConfig.WINDOW_HEIGHT,
         },
+        "ui": {
+            "customer_splitter_sizes": [65, 35],
+        },
     }
 
     def __init__(self, path=None):
@@ -86,5 +89,13 @@ class Settings:
             for key in values:
                 if key in candidate:
                     values[key] = candidate[key]
+
+        sizes = normalized["ui"].get("customer_splitter_sizes")
+        if not (
+            isinstance(sizes, list)
+            and len(sizes) == 2
+            and all(isinstance(value, int) and value > 0 for value in sizes)
+        ):
+            normalized["ui"]["customer_splitter_sizes"] = [65, 35]
 
         return normalized

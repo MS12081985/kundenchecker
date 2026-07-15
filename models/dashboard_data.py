@@ -18,3 +18,9 @@ class DashboardData:
     last_research_cancelled: bool | None = None
     last_research_duration: float | None = None
     recent_changes: list = field(default_factory=list)
+    open_follow_ups: int = 0
+    overdue_follow_ups: int = 0
+    prospects: int = 0
+    customers: int = 0
+    high_priority: int = 0
+    today_activities: int = 0

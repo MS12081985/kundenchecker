@@ -14,6 +14,7 @@ class MainMenu(QObject):
     exit_requested = Signal()
 
     duplicate_requested = Signal()
+    phone_cleanup_requested = Signal()
 
     research_requested = Signal()
     research_refresh_requested = Signal()
@@ -83,6 +84,9 @@ class MainMenu(QObject):
         extras_menu.addAction(
             duplicate_action
         )
+        phone_action = QAction("Telefonnummern neu validieren", self)
+        phone_action.triggered.connect(self.phone_cleanup_requested.emit)
+        extras_menu.addAction(phone_action)
 
         # -------------------------------------------------
         # Recherche

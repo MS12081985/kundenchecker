@@ -10,6 +10,12 @@ from config.settings import Settings
 from services.customer_service import CustomerService
 from services.duplicate_service import DuplicateService
 from services.research_service import ResearchService
+from services.license_service import LicenseService
+from services.crm_service import CRMService
+from services.maps_service import build_maps_url
+from services.phone_cleanup_service import PhoneCleanupService
+from services.deduplication_service import DeduplicationService
+from services.customer_export_service import CustomerExportService
 from ui.main_window import MainWindow
 from workers.research_worker import ResearchWorker
 from models.research_report import ResearchError, ResearchReport, build_change
@@ -18,6 +24,8 @@ import json
 import pandas as pd
 import shutil
 from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QUrl
 
 
 class ApplicationController(QObject):
@@ -32,7 +40,10 @@ class ApplicationController(QObject):
     error_requested = Signal(str, str)
     settings_dialog_requested = Signal(object, object)
     export_file_dialog_requested = Signal(str, str)
+    customer_export_dialog_requested = Signal(str)
+    customer_export_counts_changed = Signal(int, int, int, str)
     window_size_restore_requested = Signal(int, int)
+    splitter_restore_requested = Signal(object)
     progress_dialog_requested = Signal(int)
     research_progress_changed = Signal(int, int, str, str)
     progress_dialog_close_requested = Signal()
@@ -46,7 +57,11 @@ class ApplicationController(QObject):
     dashboard_data_changed = Signal(object)
     page_changed = Signal(int)
     start_dialog_requested = Signal()
+    license_dialog_requested = Signal(object)
     excel_file_dialog_requested = Signal()
+    crm_data_changed = Signal(object)
+    crm_activity_dialog_requested = Signal(object)
+    crm_history_dialog_requested = Signal(object)
     reports_data_changed = Signal(object)
     report_changes_changed = Signal(object)
 
@@ -60,6 +75,9 @@ class ApplicationController(QObject):
         AppConfig.REQUEST_TIMEOUT = int(self.settings["research"].get("timeout", AppConfig.REQUEST_TIMEOUT))
         self.customer_service = CustomerService()
         self.research_service = ResearchService()
+        self.license_service = LicenseService()
+        self.crm_service = CRMService()
+        self.customer_export_service = CustomerExportService()
         self._current_dataframe = None
         self._selected_customer = None
         self._selected_customers = []
@@ -70,6 +88,10 @@ class ApplicationController(QObject):
         self._pending_research_worklist = None
         self._last_research_report = self._load_last_report()
         self._report_filter = "all"
+        self._editing_activity_id = None
+        self._crm_filter = {"stage": "Alle Kundenstatus", "priority": "Alle Prioritäten", "tag": ""}
+        self._show_followups_only = False
+        self._pending_customer_export = None
 
         self._connect_signals()
 
@@ -80,11 +102,17 @@ class ApplicationController(QObject):
         self.window.start_open_excel_requested.connect(self.load_excel_from_dialog)
         self.window.start_template_requested.connect(self.save_import_template)
         self.window.start_dashboard_requested.connect(self.show_dashboard)
+        self.window.license_file_selected.connect(self.load_license)
         self.window.export_file_selected.connect(self.export_customers)
+        self.window.customer_export_options_changed.connect(self.preview_customer_export)
+        self.window.customer_export_confirmed.connect(self.confirm_customer_export)
         self.window.settings_requested.connect(self.show_settings)
         self.window.settings_changed.connect(self.save_settings)
         self.window.window_size_changed.connect(self.save_window_size)
+        self.window.splitter_sizes_changed.connect(self.save_splitter_sizes)
         self.window.search_changed.connect(self.filter_customers)
+        self.window.crm_filter_changed.connect(self.set_crm_filter)
+        self.window.follow_ups_requested.connect(self.show_open_follow_ups)
         self.window.customer_selected.connect(self.select_customer)
         self.window.selected_customers_changed.connect(self.set_selected_customers)
         self.window.check_requested.connect(self.research_selected_customer)
@@ -106,8 +134,17 @@ class ApplicationController(QObject):
         self.window.research_filter_accepted.connect(self.start_filtered_research)
         self.window.research_filter_confirmed.connect(self.start_confirmed_research)
         self.window.duplicates_requested.connect(self.find_duplicates)
+        self.window.phone_cleanup_requested.connect(self.revalidate_phone_numbers)
         self.window.research_cancel_requested.connect(self.cancel_research)
         self.window.quit_requested.connect(self.quit_requested)
+        self.window.crm_save_requested.connect(self.save_crm_data)
+        self.window.crm_activity_requested.connect(self.open_crm_activity)
+        self.window.crm_history_requested.connect(self.open_crm_history)
+        self.window.maps_requested.connect(self.open_maps)
+        self.window.follow_up_done_requested.connect(self.complete_follow_up)
+        self.window.crm_activity_submitted.connect(self.save_activity)
+        self.window.crm_activity_edit_requested.connect(self.edit_activity)
+        self.window.crm_activity_delete_requested.connect(self.delete_activity)
 
         self.customers_changed.connect(self.window.set_customers)
         self.customer_details_changed.connect(self.window.set_customer_details)
@@ -118,7 +155,10 @@ class ApplicationController(QObject):
         self.error_requested.connect(self.window.show_error)
         self.settings_dialog_requested.connect(self.window.show_settings_dialog)
         self.export_file_dialog_requested.connect(self.window.select_export_file)
+        self.customer_export_dialog_requested.connect(self.window.show_customer_export_dialog)
+        self.customer_export_counts_changed.connect(self.window.update_customer_export_counts)
         self.window_size_restore_requested.connect(self.window.restore_window_size)
+        self.splitter_restore_requested.connect(self.window.restore_customer_splitter)
         self.progress_dialog_requested.connect(self.window.show_progress_dialog)
         self.research_progress_changed.connect(self.window.update_progress_dialog)
         self.progress_dialog_close_requested.connect(self.window.close_progress_dialog)
@@ -134,20 +174,46 @@ class ApplicationController(QObject):
         self.page_changed.connect(self.window.set_page)
         self.reports_data_changed.connect(self.window.set_reports_data)
         self.report_changes_changed.connect(self.window.set_report_changes)
+        self.crm_data_changed.connect(self.window.set_crm_data)
+        self.crm_activity_dialog_requested.connect(self.window.show_crm_activity_dialog)
+        self.crm_history_dialog_requested.connect(self.window.show_crm_history_dialog)
         self.window_requested.connect(self.window.show)
         self.start_dialog_requested.connect(self.window.show_start_dialog)
+        self.license_dialog_requested.connect(self.window.show_license_dialog)
         self.excel_file_dialog_requested.connect(self.window._select_excel_file)
 
     def start(self):
         if self.settings["general"]["restore_window_size"]:
             window = self.settings["window"]
             self.window_size_restore_requested.emit(window["width"], window["height"])
+        self.splitter_restore_requested.emit(self.settings["ui"]["customer_splitter_sizes"])
         self.status_changed.emit("Bereit")
         self._update_dashboard()
         self.show_dashboard()
         logger.info("Dashboard geöffnet")
         self.window_requested.emit()
         self.start_dialog_requested.emit()
+        if not self.license_service.validate()[0]:
+            self.license_dialog_requested.emit(self.license_service.status())
+
+    @Slot(str)
+    def load_license(self, filename):
+        try:
+            self.license_service.directory.mkdir(parents=True, exist_ok=True)
+            (self.license_service.license_path).write_text(Path(filename).read_text(encoding="utf-8"), encoding="utf-8")
+            self.license_service.load()
+            self.status_changed.emit(self.license_service.validate()[1])
+        except (OSError, ValueError) as error:
+            logger.exception("Lizenz konnte nicht geladen werden: {}", error)
+            self.error_requested.emit("Lizenz", "Die Lizenzdatei konnte nicht geladen werden.")
+
+    def _license_required(self, amount=1):
+        valid, message = self.license_service.can_research(amount)
+        if not valid:
+            logger.warning("Recherche gesperrt: {}", message)
+            self.status_changed.emit("Recherche gesperrt – gültige Lizenz erforderlich.")
+            return True
+        return False
 
     @Slot()
     def load_excel_from_dialog(self):
@@ -250,7 +316,7 @@ class ApplicationController(QObject):
                     active=int(status.eq("aktiv").sum()), inactive=int(status.eq("nicht aktiv").sum()),
                     not_found=int(status.eq("nicht gefunden").sum()),
                     missing_website=int(missing("WEBSITE").sum()), missing_phone=int(missing("TELEFON").sum()),
-                    missing_email=int(missing("EMAIL").sum()), visible_rows=len(self.customer_service.search(self._active_search_text)),
+                    missing_email=int(missing("EMAIL").sum()), visible_rows=len(self._filtered_customers()),
                 )
             report = self._last_research_report
             if report is not None:
@@ -260,6 +326,7 @@ class ApplicationController(QObject):
                 data.last_research_cancelled = report.cancelled
                 data.last_research_duration = report.duration_seconds
                 data.recent_changes = report.changes[-5:]
+            data.__dict__.update(self.crm_service.dashboard_counts())
             self.dashboard_data_changed.emit(data)
             logger.info("Dashboard-Daten aktualisiert: {} Kunden", data.total)
         except Exception as error:
@@ -291,11 +358,60 @@ class ApplicationController(QObject):
         except OSError as error:
             self.error_requested.emit("Einstellungen", str(error))
 
+    @Slot(object)
+    def save_splitter_sizes(self, sizes):
+        settings = Settings.normalize(self.settings)
+        settings["ui"]["customer_splitter_sizes"] = [int(value) for value in sizes]
+        try:
+            self.settings = self.settings_store.save(settings)
+        except OSError as error:
+            self.error_requested.emit("Einstellungen", str(error))
+
     @Slot()
     def request_export_file(self):
         logger.info("Schnellaktion Export ausgelöst")
+        if self._current_dataframe is None or self._current_dataframe.empty:
+            self.information_requested.emit("Export", "Es sind keine Kundendaten zum Exportieren vorhanden.")
+            return
+        self._pending_customer_export = None
+        self.customer_export_dialog_requested.emit(self.settings["export"]["format"])
+
+    def _customer_export_selection(self, options):
+        options = dict(options or {})
+        scope = options.get("scope", "visible")
+        source = self._current_dataframe if scope == "all_loaded" else self._filtered_customers()
+        selected = self.customer_export_service.select(source, scope, self._selected_customers)
+        return self.customer_export_service.columns(
+            selected,
+            include_crm=bool(options.get("include_crm", True)),
+            include_technical=bool(options.get("include_technical", False)),
+        )
+
+    @Slot(object)
+    def preview_customer_export(self, options):
+        total = len(self._current_dataframe) if self._current_dataframe is not None else 0
+        visible = len(self._filtered_customers()) if self._current_dataframe is not None else 0
+        selected = self._customer_export_selection(options)
+        message = ""
+        if dict(options or {}).get("scope") == "selected" and not self._selected_customers:
+            message = "Bitte markieren Sie mindestens einen Kunden."
+        elif selected.empty:
+            message = "Für die gewählte Auswahl sind keine Datensätze vorhanden."
+        self.customer_export_counts_changed.emit(total, visible, len(selected), message)
+
+    @Slot(object)
+    def confirm_customer_export(self, options):
+        frame = self._customer_export_selection(options)
+        if frame.empty:
+            if dict(options or {}).get("scope") == "selected" and not self._selected_customers:
+                self.information_requested.emit("Export", "Bitte markieren Sie mindestens einen Kunden.")
+            else:
+                self.information_requested.emit("Export", "Für die gewählte Auswahl sind keine Datensätze vorhanden.")
+            return
+        self._pending_customer_export = {"options": dict(options), "dataframe": frame}
+        self.window.close_customer_export_dialog()
         export = self.settings["export"]
-        self.export_file_dialog_requested.emit(export["directory"], export["format"])
+        self.export_file_dialog_requested.emit(export["directory"], dict(options).get("format", "xlsx"))
 
     @Slot()
     def save_import_template(self):
@@ -339,6 +455,7 @@ class ApplicationController(QObject):
 
         self._selected_customer = None
         self._active_search_text = ""
+        dataframe = self.crm_service.merge_dataframe(dataframe)
         self.customer_service.set_dataframe(dataframe)
         if "CITY" not in dataframe.columns:
             self.information_requested.emit(
@@ -357,7 +474,7 @@ class ApplicationController(QObject):
     @Slot(str)
     def filter_customers(self, text):
         self._active_search_text = text
-        filtered = self.customer_service.search(text)
+        filtered = self._filtered_customers()
         self.customers_changed.emit(filtered)
         self.customer_count_changed.emit(len(filtered))
         total = len(self._current_dataframe) if self._current_dataframe is not None else len(filtered)
@@ -365,55 +482,200 @@ class ApplicationController(QObject):
         self._update_dashboard()
         self.status_changed.emit(f"{len(filtered)} passende Kunden gefunden.")
 
+    @Slot(object)
+    def set_crm_filter(self, values):
+        self._crm_filter = dict(values or {})
+        filtered = self._filtered_customers()
+        total = len(self._current_dataframe) if self._current_dataframe is not None else 0
+        self.customers_changed.emit(filtered)
+        self.customer_count_changed.emit(len(filtered))
+        self.visible_count_changed.emit(len(filtered), total)
+        self._update_dashboard()
+
+    @Slot()
+    def show_open_follow_ups(self):
+        self._show_followups_only = True
+        self.show_customers()
+        filtered = self._filtered_customers()
+        self.customers_changed.emit(filtered)
+        self.status_changed.emit(f"Offene Wiedervorlagen: {len(filtered)}")
+
+    def _filtered_customers(self):
+        dataframe = self.customer_service.search(self._active_search_text)
+        if dataframe is None or dataframe.empty:
+            return dataframe
+        stage = self._crm_filter.get("stage", "Alle Kundenstatus")
+        priority = self._crm_filter.get("priority", "Alle Prioritäten")
+        tag = self._crm_filter.get("tag", "").casefold()
+        mask = pd.Series(True, index=dataframe.index)
+        if getattr(self, "_show_followups_only", False) and "NÄCHSTE_WIEDERVORLAGE" in dataframe.columns:
+            mask &= dataframe["NÄCHSTE_WIEDERVORLAGE"].fillna("").astype(str).str.strip().ne("")
+        if stage != "Alle Kundenstatus" and "KUNDENSTATUS" in dataframe.columns:
+            mask &= dataframe["KUNDENSTATUS"].fillna("").astype(str).eq(stage)
+        if priority != "Alle Prioritäten" and "PRIORITÄT" in dataframe.columns:
+            mask &= dataframe["PRIORITÄT"].fillna("").astype(str).eq(priority)
+        if tag and "TAGS" in dataframe.columns:
+            mask &= dataframe["TAGS"].fillna("").astype(str).str.casefold().str.contains(tag, regex=False)
+        return dataframe.loc[mask].reset_index(drop=True)
+
     @Slot(str, str)
     def export_customers(self, filename, selected_filter):
-        dataframe = self.customer_service.search(self._active_search_text)
+        pending = self._pending_customer_export
+        if pending:
+            dataframe = pending["dataframe"]
+            export_format = pending["options"].get("format", "xlsx")
+        else:
+            dataframe = self.customer_export_service.columns(self._filtered_customers(), include_crm=True)
+            export_format = "csv" if "CSV" in selected_filter else "xlsx"
         if dataframe.empty:
             self.information_requested.emit(
                 "Export", "Es sind keine Kundendaten zum Exportieren vorhanden."
             )
             return
 
-        path = Path(filename)
-        if not path.suffix:
-            suffix = ".csv" if "CSV" in selected_filter else ".xlsx"
-            path = path.with_suffix(suffix)
-
-        suffix = path.suffix.lower()
-        if suffix not in {".xlsx", ".csv"}:
-            self.error_requested.emit(
-                "Export", "Bitte wählen Sie eine .xlsx- oder .csv-Datei."
-            )
-            return
-
         try:
-            logger.info("Export gestartet: {} Datensätze nach {}", len(dataframe), path)
-            if suffix == ".xlsx":
-                dataframe.to_excel(path, index=False, engine="openpyxl")
-            else:
-                dataframe.to_csv(path, index=False, encoding="utf-8-sig")
+            path = self.customer_export_service.target_path(filename, export_format)
+            logger.info("Export gestartet: {} Datensätze, Format={}", len(dataframe), export_format)
+            path = self.customer_export_service.write(dataframe, path, export_format)
         except Exception as error:
             logger.exception("Export fehlgeschlagen: {}", error)
-            self.error_requested.emit("Export", str(error))
+            self.error_requested.emit("Export", "Die Kundendaten konnten nicht exportiert werden.")
             return
 
+        self._pending_customer_export = None
         logger.info("Export erfolgreich abgeschlossen: {}", path)
+        settings = Settings.normalize(self.settings)
+        settings["export"]["format"] = export_format
         if self.settings["general"]["remember_export_directory"]:
-            settings = Settings.normalize(self.settings)
             settings["export"]["directory"] = str(path.parent)
-            try:
-                self.settings = self.settings_store.save(settings)
-            except OSError as error:
-                self.error_requested.emit("Einstellungen", str(error))
+        try:
+            self.settings = self.settings_store.save(settings)
+        except OSError as error:
+            self.error_requested.emit("Einstellungen", str(error))
         self.status_changed.emit(f"{len(dataframe)} Kunden exportiert.")
         self.information_requested.emit(
-            "Export", f"{len(dataframe)} Kunden wurden exportiert."
+            "Export", f"{len(dataframe)} Kunden wurden exportiert.\nZiel: {path}"
         )
 
     @Slot(object)
     def select_customer(self, customer):
         self._selected_customer = customer
         self.customer_details_changed.emit(customer)
+        if customer:
+            data = self.crm_service.get_crm_data(
+                customer.get("KUNDENNAME", ""), customer.get("CITY", "")
+            )
+            self.crm_data_changed.emit(data)
+        else:
+            self.crm_data_changed.emit(None)
+
+    @Slot(object)
+    def save_crm_data(self, values):
+        if not self._selected_customer:
+            self.information_requested.emit("CRM", "Bitte zuerst eine Firma auswählen.")
+            return
+        try:
+            company = self._selected_customer.get("KUNDENNAME", "")
+            city = self._selected_customer.get("CITY", "")
+            data = self.crm_service.save_crm_data(company, city, **dict(values or {}))
+            if self._current_dataframe is not None:
+                matches = (self._current_dataframe["KUNDENNAME"].astype(str) == str(company))
+                if "CITY" in self._current_dataframe.columns:
+                    matches &= self._current_dataframe["CITY"].astype(str) == str(city)
+                labels = {
+                    "contact_person": "ANSPRECHPARTNER", "contact_position": "POSITION",
+                    "direct_phone": "DIREKTTELEFON", "direct_email": "DIREKTE_EMAIL",
+                    "customer_stage": "KUNDENSTATUS", "priority": "PRIORITÄT", "tags": "TAGS",
+                    "notes": "NOTIZEN", "last_contact_at": "LETZTER_KONTAKT",
+                    "next_follow_up_at": "NÄCHSTE_WIEDERVORLAGE",
+                }
+                for field, label in labels.items():
+                    if label in self._current_dataframe.columns:
+                        self._current_dataframe.loc[matches, label] = data.get(field, "")
+                self.customer_service.set_dataframe(self._current_dataframe)
+                self.customers_changed.emit(self._filtered_customers())
+            self.crm_data_changed.emit(data)
+            self.status_changed.emit("CRM-Daten gespeichert.")
+            self._update_dashboard()
+        except Exception:
+            logger.exception("CRM-Daten konnten nicht gespeichert werden")
+            self.error_requested.emit("CRM", "Die CRM-Daten konnten nicht gespeichert werden.")
+
+    @Slot()
+    def open_crm_activity(self):
+        if not self._selected_customer:
+            self.information_requested.emit("CRM", "Bitte zuerst eine Firma auswählen.")
+            return
+        self._editing_activity_id = None
+        self.crm_activity_dialog_requested.emit(None)
+
+    @Slot(object)
+    def save_activity(self, activity):
+        if not self._selected_customer:
+            return
+        try:
+            company = self._selected_customer.get("KUNDENNAME", "")
+            city = self._selected_customer.get("CITY", "")
+            activity = dict(activity or {})
+            if getattr(self, "_editing_activity_id", None):
+                self.crm_service.update_activity(self._editing_activity_id, **activity)
+                self._editing_activity_id = None
+            else:
+                self.crm_service.add_activity(company, city, **activity)
+            self.status_changed.emit("CRM-Aktivität gespeichert.")
+            self._update_dashboard()
+        except Exception:
+            logger.exception("CRM-Aktivität konnte nicht gespeichert werden")
+            self.error_requested.emit("CRM", "Die Aktivität konnte nicht gespeichert werden.")
+
+    @Slot()
+    def open_crm_history(self):
+        if not self._selected_customer:
+            self.information_requested.emit("CRM", "Bitte zuerst eine Firma auswählen.")
+            return
+        activities = self.crm_service.list_activities(
+            self._selected_customer.get("KUNDENNAME", ""), self._selected_customer.get("CITY", "")
+        )
+        self.crm_history_dialog_requested.emit(activities)
+
+    @Slot(object)
+    def edit_activity(self, activity):
+        activity = dict(activity or {})
+        self._editing_activity_id = activity.pop("id", None)
+        self.crm_activity_dialog_requested.emit(activity)
+
+    @Slot(object)
+    def delete_activity(self, activity):
+        activity = dict(activity or {})
+        if activity.get("id") and self.crm_service.delete_activity(activity["id"]):
+            self.status_changed.emit("CRM-Aktivität gelöscht.")
+            self._update_dashboard()
+
+    @Slot()
+    def complete_follow_up(self):
+        if self._selected_customer:
+            self.crm_service.complete_follow_ups(
+                self._selected_customer.get("KUNDENNAME", ""),
+                self._selected_customer.get("CITY", ""),
+            )
+            self.save_crm_data({"next_follow_up_at": ""})
+
+    @Slot()
+    def open_maps(self):
+        customer = self._selected_customer or {}
+        url = build_maps_url(
+            customer.get("KUNDENNAME", ""),
+            customer.get("STRASSE", customer.get("STREET", "")),
+            customer.get("PLZ", customer.get("POSTLEITZAHL", "")),
+            customer.get("CITY", ""),
+            customer.get("LAND", customer.get("COUNTRY", "")),
+        )
+        if not url:
+            self.information_requested.emit("Google Maps", "Für diesen Kunden ist keine vollständige Adresse vorhanden.")
+            return
+        if not QDesktopServices.openUrl(QUrl(url)):
+            logger.error("Google-Maps-URL konnte nicht geöffnet werden")
+            self.error_requested.emit("Google Maps", "Die Adresse konnte nicht geöffnet werden.")
 
     @Slot(object)
     def set_selected_customers(self, customers):
@@ -423,26 +685,84 @@ class ApplicationController(QObject):
 
     @Slot()
     def find_duplicates(self):
-        if self._current_dataframe is None:
-            self.information_requested.emit(
-                "Hinweis", "Bitte zuerst eine Excel-Datei laden."
-            )
-            return
+        service = DeduplicationService(database=self.crm_service.database)
+        groups = service.groups()
+        if not groups:
+            imported = 0 if self._current_dataframe is None else len(DuplicateService(self._current_dataframe).find_exact_duplicates())
+            message = "Keine bereinigbaren Dubletten in der Kundendatenbank gefunden."
+            if imported: message += f"\nIm Excel-Import sind {imported} doppelte Zeilen; diese besitzen noch keine stabilen Datenbank-IDs."
+            self.information_requested.emit("Dublettenprüfung", message); return
+        decisions = self.window.review_duplicates(groups)
+        if not decisions: self.status_changed.emit("Dublettenbereinigung abgebrochen."); return
+        removed = cleaned = 0
+        try:
+            decision = decisions[-1]
+            if decision["action"] == "merge":
+                answer = QMessageBox.question(self.window, "Zusammenführen bestätigen", f"{len(decision['duplicate_ids'])} Datensätze werden nach Erstellung eines Backups zusammengeführt.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if answer != QMessageBox.Yes: return
+                result = service.merge_group(decision["master_id"], decision["duplicate_ids"], decision["resolutions"]); removed += result["removed"]; cleaned += 1
+            elif decision["action"] == "delete":
+                answer = QMessageBox.question(self.window, "Löschen bestätigen", "Der ausgewählte Datensatz wird nach Erstellung eines Backups gelöscht.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if answer != QMessageBox.Yes: return
+                result = service.delete_record(decision["record_id"]); removed += result["removed"]; cleaned += 1
+            elif decision["action"] == "auto":
+                safe = decision["groups"]
+                count = sum(len(group["records"]) - 1 for group in safe)
+                if not safe: self.information_requested.emit("Dubletten", "Keine vollständig identischen Gruppen vorhanden."); return
+                backup = service.create_backup()
+                answer = QMessageBox.question(self.window, "Automatische Bereinigung bestätigen", f"Gruppen: {len(safe)}\nZu entfernende Datensätze: {count}\nBackup: {backup}", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if answer != QMessageBox.Yes: return
+                for group in safe:
+                    master = group["suggested_master_id"]
+                    result = service.merge_group(master, [r["id"] for r in group["records"] if r["id"] != master], backup_path=backup); removed += result["removed"]; cleaned += 1
+        except Exception as error:
+            self.error_requested.emit("Dublettenbereinigung", f"Keine teilweise Änderung innerhalb der betroffenen Gruppe.\n{error}"); return
+        # Refresh all controller-owned views while preserving active filters.
+        if self._current_dataframe is not None:
+            self._current_dataframe = self.crm_service.merge_dataframe(self._current_dataframe)
+            self.customer_service.set_dataframe(self._current_dataframe); self.customers_changed.emit(self._filtered_customers())
+        self._selected_customer = None; self.customer_details_changed.emit(None); self._update_dashboard()
+        self.status_changed.emit(f"{cleaned} Dublettengruppen bereinigt – {removed} Datensätze zusammengeführt.")
 
-        duplicates = DuplicateService(
-            self._current_dataframe
-        ).find_exact_duplicates()
-        self.information_requested.emit(
-            "Dublettenprüfung", f"{len(duplicates)} doppelte Datensätze gefunden."
-        )
-        self.status_changed.emit("Dublettenprüfung abgeschlossen.")
+    @Slot()
+    def revalidate_phone_numbers(self):
+        service = PhoneCleanupService(database=self.crm_service.database)
+        try:
+            items = service.preview()
+        except Exception as error:
+            logger.exception("Telefonvorschau fehlgeschlagen")
+            self.error_requested.emit("Telefonnummern", str(error)); return
+        if not items:
+            self.information_requested.emit("Telefonnummern", "Es sind keine gespeicherten Datensätze vorhanden."); return
+        if not self.window.confirm_phone_cleanup(items):
+            self.status_changed.emit("Telefonbereinigung abgebrochen."); return
+        try:
+            result = service.apply(items)
+        except Exception as error:
+            self.error_requested.emit("Telefonnummern", f"Keine Daten wurden geändert.\n{error}"); return
+        # Imported Excel rows are kept in memory; update matching stored values.
+        if self._current_dataframe is not None:
+            lookup = {(item.company, item.city): item for item in items}
+            for index, row in self._current_dataframe.iterrows():
+                item = lookup.get((str(row.get("KUNDENNAME", "")), str(row.get("CITY", ""))))
+                if item:
+                    self._current_dataframe.at[index, "TELEFON"] = item.after
+                    self._current_dataframe.at[index, "STATUS"] = item.status_after
+            self.customer_service.set_dataframe(self._current_dataframe)
+            self.customers_changed.emit(self._filtered_customers())
+        self.customer_details_changed.emit(None); self._selected_customer = None
+        self._update_dashboard()
+        self.status_changed.emit(f"Telefonnummern geprüft – {result['changed']} Datensätze geändert.")
+        self.information_requested.emit("Telefonnummern", f"Bereinigung abgeschlossen.\nBackup: {result['backup']}")
 
     @Slot()
     def research_selected_customer(self):
+        if self._license_required(): return
         self._research_selected(force_refresh=False)
 
     @Slot()
     def research_selected_refresh(self):
+        if self._license_required(): return
         logger.info("Erneute Einzelrecherche gestartet.")
         self._research_selected(force_refresh=True)
 
@@ -492,12 +812,14 @@ class ApplicationController(QObject):
                 matches &= self._current_dataframe["CITY"].astype(str) == result.city
             for column, value in {"WEBSITE": result.website, "TELEFON": result.phone, "EMAIL": result.email, "STATUS": result.status}.items():
                 self._current_dataframe.loc[matches, column] = value
-            self.customers_changed.emit(self.customer_service.search(self._active_search_text))
+            self.customers_changed.emit(self._filtered_customers())
         self.customer_details_changed.emit(details)
         report = ResearchReport.start(1)
         report.add_change(build_change(before, result))
         report.finish(False)
         self._set_last_report(report)
+        if getattr(result, "source", "") != "SQLite":
+            self.license_service.record_researches(1)
         self.status_changed.emit(report.summary_text())
         self._update_dashboard()
 
@@ -576,11 +898,14 @@ class ApplicationController(QObject):
                 "Recherche", "Die gewählten Filter ergeben keine Firmen."
             )
             return
+        if self._license_required(len(working_list)):
+            return
 
         self._start_research_worker(working_list, force_refresh=force_refresh)
 
     @Slot()
     def research_marked_refresh(self):
+        if self._license_required(): return
         if self._thread is not None:
             return
         if self._current_dataframe is None:
@@ -598,6 +923,7 @@ class ApplicationController(QObject):
 
     @Slot()
     def research_inactive_refresh(self):
+        if self._license_required(): return
         logger.info("Schnellaktion Nicht aktive Firmen erneut prüfen ausgelöst")
         if self._thread is not None:
             return
@@ -635,7 +961,7 @@ class ApplicationController(QObject):
 
         dataframe = self._current_dataframe
         if options.get("only_filtered"):
-            dataframe = self.customer_service.search(self._active_search_text)
+            dataframe = self._filtered_customers()
 
         if options.get("only_selected"):
             dataframe = dataframe.loc[
@@ -824,6 +1150,7 @@ class ApplicationController(QObject):
     @Slot(list, bool)
     def _on_research_finished(self, results, cancelled):
         self.progress_dialog_close_requested.emit()
+        self.license_service.record_researches(sum(1 for result in results if getattr(result, "source", "") != "SQLite"))
         report = self._last_research_report
         if cancelled:
             logger.info("Massenrecherche abgebrochen ({} Ergebnisse).", len(results))

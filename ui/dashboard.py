@@ -9,6 +9,7 @@ class Dashboard(QWidget):
     inactive_refresh_requested = Signal()
     report_requested = Signal()
     export_requested = Signal()
+    follow_ups_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -35,10 +36,13 @@ class Dashboard(QWidget):
         layout.addLayout(self.cards)
         self.details = QLabel("Öffnen Sie eine Excel-Datei, um zu beginnen.")
         self.details.setWordWrap(True); layout.addWidget(self.details)
+        self.crm_details = QLabel()
+        self.crm_details.setWordWrap(True)
+        layout.addWidget(self.crm_details)
         actions = QHBoxLayout()
         for text, signal in [("Excel öffnen", self.open_excel_requested), ("Zur Kundenliste", self.customers_requested),
                              ("Alle Firmen prüfen", self.bulk_check_requested), ("Nicht aktive erneut prüfen", self.inactive_refresh_requested),
-                             ("Letzten Bericht", self.report_requested), ("Export", self.export_requested)]:
+                             ("Offene Wiedervorlagen", self.follow_ups_requested), ("Letzten Bericht", self.report_requested), ("Export", self.export_requested)]:
             button = QPushButton(text); button.setMinimumHeight(34); button.clicked.connect(signal); actions.addWidget(button)
         layout.addLayout(actions); layout.addStretch()
         scroll = QScrollArea(self); scroll.setWidgetResizable(True); scroll.setWidget(content)
@@ -57,4 +61,11 @@ class Dashboard(QWidget):
             f"Ohne Website: {data.missing_website} | Ohne Telefonnummer: {data.missing_phone} | Ohne E-Mail: {data.missing_email}\n"
             f"Sichtbar: {data.visible_rows} von {data.total}\n"
             f"Letzte Recherche: {last} | Verarbeitet: {processed_text} | Fehler: {'–' if errors is None else errors} | Abgebrochen: {'–' if cancelled is None else ('Ja' if cancelled else 'Nein')}"
+        )
+        self.crm_details.setText(
+            f"Offene Wiedervorlagen: {getattr(data, 'open_follow_ups', 0)} | "
+            f"Überfällig: {getattr(data, 'overdue_follow_ups', 0)} | "
+            f"Interessenten: {getattr(data, 'prospects', 0)} | Kunden: {getattr(data, 'customers', 0)} | "
+            f"Hohe Priorität: {getattr(data, 'high_priority', 0)} | "
+            f"Heutige Aktivitäten: {getattr(data, 'today_activities', 0)}"
         )

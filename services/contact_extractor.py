@@ -1,4 +1,5 @@
 import re
+import json
 from urllib.parse import urljoin
 
 import requests
@@ -49,7 +50,7 @@ class ContactExtractor:
                 if not html:
                     continue
 
-                found = self.extract_candidates_from_html(html)
+                found = self.extract_candidates_from_html(html, page)
                 phone_candidates.extend(found["phones"])
                 email_candidates.extend(found["emails"])
 
@@ -61,8 +62,8 @@ class ContactExtractor:
                     "phone": choose_phone(phone_candidates),
                     "email": choose_email(email_candidates),
                 }
-                if result["phone"] and result["email"]:
-                    break
+                # Continue through the bounded page list: a contact or imprint
+                # page can outrank an otherwise valid footer candidate.
         except Exception as error:
             logger.exception("Validierungsfehler bei ContactExtractor: {}", error)
 
@@ -106,9 +107,18 @@ class ContactExtractor:
         pages = self.find_contact_pages(website, html)
         return pages[0] if pages else ""
 
-    def extract_candidates_from_html(self, html):
+    def extract_candidates_from_html(self, html, page_url=""):
         soup = BeautifulSoup(html, "lxml")
-        phones = list(self.PHONE_PATTERN.findall(soup.get_text(" ", strip=True)))
+        for element in soup(["script", "style", "noscript", "template"]):
+            element.extract()
+        for element in soup.select('[hidden], [aria-hidden="true"], [style*="display:none"], [style*="display: none"]'):
+            element.extract()
+        page_kind = "contact" if "kontakt" in page_url.lower() or "contact" in page_url.lower() else ("imprint" if "impress" in page_url.lower() else "text")
+        visible = soup.get_text(" ", strip=True)
+        phones = []
+        for match in self.PHONE_PATTERN.finditer(visible):
+            start, end = match.span()
+            phones.append({"value": match.group(), "source": page_kind, "context": visible[max(0, start-40):end+40], "require_context": True})
         emails = list(self.EMAIL_PATTERN.findall(soup.get_text(" ", strip=True)))
 
         for link in soup.find_all("a", href=True):
@@ -117,7 +127,20 @@ class ContactExtractor:
             if lower.startswith("mailto:"):
                 emails.append(href[7:].split("?", 1)[0])
             elif lower.startswith("tel:"):
-                phones.append(href[4:].split("?", 1)[0])
+                phones.append({"value": href[4:].split("?", 1)[0], "source": "tel", "context": link.get_text(" ", strip=True)})
+
+        # JSON-LD is intentionally read from the original document after visible
+        # scripts were removed from the text search.
+        original = BeautifulSoup(html, "lxml")
+        for script in original.find_all("script", type="application/ld+json"):
+            try:
+                payload = json.loads(script.string or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            nodes = payload if isinstance(payload, list) else [payload]
+            for node in nodes:
+                if isinstance(node, dict) and node.get("telephone"):
+                    phones.append({"value": node["telephone"], "source": "jsonld", "context": "Telefon"})
 
         logger.info("Telefonkandidaten gefunden: {}", len(phones))
         logger.info("E-Mail-Kandidaten gefunden: {}", len(emails))

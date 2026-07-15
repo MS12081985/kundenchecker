@@ -10,6 +10,9 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
     QLineEdit,
+    QComboBox,
+    QDialog,
+    QLabel,
     QMainWindow,
     QPushButton,
     QHBoxLayout,
@@ -17,6 +20,8 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QMessageBox,
     QSplitter,
+    QScrollArea,
+    QAbstractScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -34,7 +39,13 @@ from widgets.research_filter_dialog import ResearchFilterDialog
 from widgets.settings_dialog import SettingsDialog
 from widgets.research_report_dialog import ResearchReportDialog
 from widgets.start_dialog import StartDialog
+from widgets.license_dialog import LicenseDialog
 from ui.reports_page import ReportsPage
+from widgets.crm_activity_dialog import CRMActivityDialog
+from widgets.crm_history_dialog import CRMHistoryDialog
+from widgets.phone_cleanup_dialog import PhoneCleanupDialog
+from widgets.duplicate_dialog import DuplicateDialog
+from widgets.customer_export_dialog import CustomerExportDialog
 
 
 class MainWindow(QMainWindow):
@@ -43,13 +54,17 @@ class MainWindow(QMainWindow):
     excel_file_selected = Signal(str)
     export_file_selected = Signal(str, str)
     export_requested = Signal()
+    customer_export_options_changed = Signal(object)
+    customer_export_confirmed = Signal(object)
     template_download_requested = Signal()
     start_open_excel_requested = Signal()
     start_template_requested = Signal()
     start_dashboard_requested = Signal()
+    license_file_selected = Signal(str)
     settings_requested = Signal()
     settings_changed = Signal(object)
     window_size_changed = Signal(int, int)
+    splitter_sizes_changed = Signal(object)
     search_changed = Signal(str)
     customer_selected = Signal(object)
     selected_customers_changed = Signal(object)
@@ -61,6 +76,7 @@ class MainWindow(QMainWindow):
     report_requested = Signal()
     report_export_file_selected = Signal(str, str)
     duplicates_requested = Signal()
+    phone_cleanup_requested = Signal()
     research_cancel_requested = Signal()
     research_filter_options_changed = Signal(object)
     research_filter_accepted = Signal(object)
@@ -78,17 +94,28 @@ class MainWindow(QMainWindow):
     report_page_export_requested = Signal()
     report_detail_requested = Signal(object)
     report_company_requested = Signal(object)
+    crm_filter_changed = Signal(object)
+    follow_ups_requested = Signal()
+    crm_save_requested = Signal(object)
+    crm_activity_requested = Signal()
+    crm_history_requested = Signal()
+    maps_requested = Signal()
+    follow_up_done_requested = Signal()
+    crm_activity_submitted = Signal(object)
+    crm_activity_edit_requested = Signal(object)
+    crm_activity_delete_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setWindowTitle("KundenChecker v0.8.0")
+        self.setWindowTitle(f"KundenChecker v{AppConfig.VERSION}")
         self.resize(1500, 900)
 
         self._build_ui()
         self._connect_ui_signals()
         self.progress_dialog = None
         self.research_filter_dialog = None
+        self.customer_export_dialog = None
 
     def _build_ui(self):
         self.main_menu = MainMenu(self)
@@ -107,19 +134,47 @@ class MainWindow(QMainWindow):
         self.search_field.setPlaceholderText(
             "Kunden, Orte oder Kontaktdaten durchsuchen …"
         )
+        self.stage_filter = QComboBox(self)
+        self.stage_filter.addItems(["Alle Kundenstatus", "Interessent", "Kontakt aufgenommen", "Angebot", "Kunde", "Inaktiv", "Gesperrt"])
+        self.priority_filter = QComboBox(self)
+        self.priority_filter.addItems(["Alle Prioritäten", "Niedrig", "Normal", "Hoch"])
+        self.tag_filter = QLineEdit(self)
+        self.tag_filter.setPlaceholderText("Tag filtern …")
+        filter_bar = QHBoxLayout()
+        filter_bar.addWidget(QLabel("Status:")); filter_bar.addWidget(self.stage_filter)
+        filter_bar.addWidget(QLabel("Priorität:")); filter_bar.addWidget(self.priority_filter)
+        filter_bar.addWidget(self.tag_filter, 1)
 
-        splitter = QSplitter(self)
-        splitter.addWidget(self.customer_table)
-        splitter.addWidget(self.detail_panel)
-        splitter.setSizes([1050, 450])
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 0)
+        table_container = QWidget(self)
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(8)
+        table_layout.addWidget(self.search_field)
+        table_layout.addLayout(filter_bar)
+        table_layout.addWidget(self.customer_table, 1)
+
+        self.detail_scroll_area = QScrollArea(self)
+        self.detail_scroll_area.setWidgetResizable(True)
+        self.detail_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.detail_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.detail_scroll_area.setSizeAdjustPolicy(QAbstractScrollArea.AdjustIgnored)
+        self.detail_scroll_area.setMinimumWidth(300)
+        self.detail_scroll_area.setWidget(self.detail_panel)
+
+        self.customer_splitter = QSplitter(Qt.Horizontal, self)
+        self.customer_splitter.addWidget(table_container)
+        self.customer_splitter.addWidget(self.detail_scroll_area)
+        self.customer_splitter.setCollapsible(0, False)
+        self.customer_splitter.setCollapsible(1, False)
+        self.customer_splitter.setStretchFactor(0, 65)
+        self.customer_splitter.setStretchFactor(1, 35)
+        self.customer_splitter.setSizes([65, 35])
+        table_container.setMinimumWidth(380)
 
         self.customers_page = QWidget(self)
         layout = QVBoxLayout(self.customers_page)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.addWidget(self.search_field)
-        layout.addWidget(splitter)
+        layout.addWidget(self.customer_splitter)
         self.stack = QStackedWidget(self)
         self.stack.addWidget(self.dashboard)
         self.stack.addWidget(self.customers_page)
@@ -177,6 +232,7 @@ class MainWindow(QMainWindow):
         self.dashboard.inactive_refresh_requested.connect(self.inactive_refresh_requested)
         self.dashboard.report_requested.connect(self.report_requested)
         self.dashboard.export_requested.connect(self.export_requested)
+        self.dashboard.follow_ups_requested.connect(self.follow_ups_requested)
         self.reports_page.filter_changed.connect(self.report_filter_changed)
         self.reports_page.reload_requested.connect(self.report_reload_requested)
         self.reports_page.export_requested.connect(self.report_page_export_requested)
@@ -189,6 +245,8 @@ class MainWindow(QMainWindow):
         self.main_menu.settings_requested.connect(self.settings_requested)
         self.main_menu.exit_requested.connect(self.quit_requested)
         self.main_menu.duplicate_requested.connect(self.duplicates_requested)
+        self.main_menu.phone_cleanup_requested.connect(self.phone_cleanup_requested)
+
         self.main_menu.research_requested.connect(self.check_requested)
         self.main_menu.research_refresh_requested.connect(self.refresh_requested)
         self.main_menu.bulk_requested.connect(self.bulk_check_requested)
@@ -206,6 +264,9 @@ class MainWindow(QMainWindow):
         self.main_toolbar.export_requested.connect(self.export_requested)
 
         self.search_field.textChanged.connect(self.search_changed)
+        self.stage_filter.currentTextChanged.connect(self._emit_crm_filter)
+        self.priority_filter.currentTextChanged.connect(self._emit_crm_filter)
+        self.tag_filter.textChanged.connect(self._emit_crm_filter)
 
         self.customer_table.selectionModel().currentRowChanged.connect(
             self._emit_selected_customer
@@ -216,6 +277,18 @@ class MainWindow(QMainWindow):
         self.detail_panel.btn_check.clicked.connect(self.check_requested)
         self.detail_panel.btn_bulk.clicked.connect(self.bulk_check_requested)
         self.detail_panel.btn_export.clicked.connect(self.export_requested)
+        self.detail_panel.crm_save_requested.connect(self.crm_save_requested)
+        self.detail_panel.crm_activity_requested.connect(self.crm_activity_requested)
+        self.detail_panel.crm_history_requested.connect(self.crm_history_requested)
+        self.detail_panel.maps_requested.connect(self.maps_requested)
+        self.detail_panel.follow_up_done_requested.connect(self.follow_up_done_requested)
+
+    def confirm_phone_cleanup(self, items):
+        return PhoneCleanupDialog(items, self).exec() == QDialog.Accepted
+
+    def review_duplicates(self, groups):
+        dialog = DuplicateDialog(groups, self)
+        return dialog.decisions if dialog.exec() == QDialog.Accepted else []
 
     def _install_navigation(self):
         view_menu = self.menuBar().addMenu("&Ansicht")
@@ -252,6 +325,13 @@ class MainWindow(QMainWindow):
     def set_dashboard_data(self, data):
         self.dashboard.set_data(data)
 
+    def _emit_crm_filter(self):
+        self.crm_filter_changed.emit({
+            "stage": self.stage_filter.currentText(),
+            "priority": self.priority_filter.currentText(),
+            "tag": self.tag_filter.text().strip(),
+        })
+
     @Slot(object)
     def set_reports_data(self, data):
         self.reports_page.set_report_data(data)
@@ -282,11 +362,31 @@ class MainWindow(QMainWindow):
             self,
             "Kunden exportieren",
             directory,
-            "Excel-Arbeitsmappe (*.xlsx);;CSV-Datei (*.csv)",
+            selected_filter,
             selected_filter,
         )
         if filename:
             self.export_file_selected.emit(filename, selected_filter)
+
+    @Slot(str)
+    def show_customer_export_dialog(self, default_format):
+        if self.customer_export_dialog is not None:
+            self.customer_export_dialog.close()
+            self.customer_export_dialog.deleteLater()
+        self.customer_export_dialog = CustomerExportDialog(default_format, self)
+        self.customer_export_dialog.options_changed.connect(self.customer_export_options_changed)
+        self.customer_export_dialog.export_requested.connect(self.customer_export_confirmed)
+        self.customer_export_dialog.open()
+
+    @Slot(int, int, int, str)
+    def update_customer_export_counts(self, total, visible, selected, message):
+        if self.customer_export_dialog is not None:
+            self.customer_export_dialog.set_counts(total, visible, selected, message)
+
+    def close_customer_export_dialog(self):
+        if self.customer_export_dialog is not None:
+            self.customer_export_dialog.accept()
+            self.customer_export_dialog = None
 
     @Slot(object)
     def show_research_report(self, report):
@@ -328,9 +428,22 @@ class MainWindow(QMainWindow):
         self.start_dialog.accept()
         self.start_dashboard_requested.emit()
 
+    @Slot(object)
+    def show_license_dialog(self, status):
+        dialog = LicenseDialog(status, self)
+        dialog.license_selected.connect(self.license_file_selected)
+        dialog.exec()
+
     @Slot(int, int)
     def restore_window_size(self, width, height):
         self.resize(width, height)
+
+    @Slot(object)
+    def restore_customer_splitter(self, sizes):
+        if isinstance(sizes, (list, tuple)) and len(sizes) == 2:
+            clean = [int(value) for value in sizes]
+            if all(value > 0 for value in clean):
+                self.customer_splitter.setSizes(clean)
 
     @Slot(object, object)
     def _emit_selected_customer(self, current, _previous):
@@ -417,6 +530,25 @@ class MainWindow(QMainWindow):
             self.detail_panel.set_customer(customer)
         else:
             self.detail_panel.clear()
+        self.detail_scroll_area.verticalScrollBar().setValue(0)
+
+    @Slot(object)
+    def set_crm_data(self, data):
+        self.detail_panel.set_crm_data(data)
+
+    @Slot(object)
+    def show_crm_activity_dialog(self, activity=None):
+        dialog = CRMActivityDialog(activity, self)
+        dialog.activity_submitted.connect(self.crm_activity_submitted)
+        dialog.exec()
+
+    @Slot(object)
+    def show_crm_history_dialog(self, activities):
+        dialog = CRMHistoryDialog(activities, self)
+        dialog.add_requested.connect(self.crm_activity_requested)
+        dialog.edit_requested.connect(self.crm_activity_edit_requested)
+        dialog.delete_requested.connect(self.crm_activity_delete_requested)
+        dialog.exec()
 
     @Slot(str)
     def set_status(self, message):
@@ -506,4 +638,5 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self.window_size_changed.emit(self.width(), self.height())
+        self.splitter_sizes_changed.emit(self.customer_splitter.sizes())
         super().closeEvent(event)

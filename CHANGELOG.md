@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.1
+
+- Kontrollierte, transaktionale Dubletten-Zusammenführung über stabile SQLite-IDs.
+- CRM-Aktivitäten, Tags, Notizen und Wiedervorlagen bleiben beim Merge erhalten.
+- Automatische zeitgestempelte SQLite-Backups vor Datenbereinigungen.
+- Strenge Telefonnummernprüfung und internationale Normalisierung mit `phonenumbers`.
+- Vorschauwerkzeug zur Bereinigung gespeicherter Telefonnummern und Kontaktstatus.
+- Kundenexport mit sichtbarer Datenmenge, exakten Statusgruppen, Markierung und optionalen CRM-Feldern.
+- Formatierter Excel-Export sowie CSV-Ausgabe mit UTF-8-BOM.
+
+## 1.1.0
+
+- Offline-Lizenzformat `.kcl` mit Ed25519-Signatur eingeführt.
+- Lizenzdialog um Status, Restkontingent und Geräte-ID-Kopieren erweitert.
+- Separaten Entwickler-Lizenzgenerator vorbereitet.
+
+## 1.0.1
+
+- Offline-Ed25519-Lizenzprüfung ohne Serverkommunikation.
+- Recherchefunktionen werden ohne gültige lokale Lizenz gesperrt.
+- Nutzungslimits und Lizenzdateien werden lokal verwaltet.
+
 ## 1.0.0
 
 - Erste installierbare macOS-App als PyInstaller-Bundle vorbereitet.
@@ -66,3 +88,9 @@
 - Strukturierte Rechercheberichte für Einzel- und Massenrecherche
 - Vorher-/Nachher-Vergleich, Qualitätsauswertung und Berichtsexport
 - Letzten Recherchebericht anzeigen und als Excel/CSV exportieren
+## 1.2.0
+
+- Lokales CRM mit Ansprechpartnern, Status, Priorität, Notizen und Wiedervorlagen
+- Chronologischer Kontaktverlauf mit SQLite-Persistenz
+- Google-Maps-Suche über externe Maps-URLs ohne API-Schlüssel
+- CRM-Kennzahlen im Dashboard und CRM-Felder im Kundenexport

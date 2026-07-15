@@ -14,6 +14,14 @@ from workers.research_worker import ResearchWorker
 APP = QApplication.instance() or QApplication([])
 
 
+class TestLicenseService:
+    def can_research(self, amount=1):
+        return True, "Testlizenz gültig"
+
+    def record_researches(self, amount):
+        return None
+
+
 def cached_row(website="https://firma.de/", phone="06151 123456", email="info@firma.de"):
     return (1, "Firma", "Berlin", website, phone, email, "", "Aktiv", "Website", "2026-01-01 10:00")
 
@@ -24,7 +32,7 @@ def test_cache_is_used_without_force_refresh():
     service.website_finder.find_website = lambda *_: (_ for _ in ()).throw(AssertionError())
     result = service.research("Firma", "Berlin")
     assert result.source == "Website"
-    assert result.phone == "06151 123456"
+    assert result.phone == "+49 6151 123456"
 
 
 def test_force_refresh_rechecks_cached_website_first():
@@ -103,6 +111,7 @@ def test_bulk_cancellation_stops_after_current_company():
 
 def test_controller_marked_and_inactive_worklists():
     controller = ApplicationController()
+    controller.license_service = TestLicenseService()
     controller._current_dataframe = pd.DataFrame([
         {"KUNDENNAME": "Aktiv", "CITY": "A", "STATUS": "Aktiv"},
         {"KUNDENNAME": "Inaktiv", "CITY": "B", "STATUS": "Nicht aktiv"},
@@ -122,6 +131,7 @@ def test_controller_marked_and_inactive_worklists():
 
 def test_controller_single_refresh_sets_force_flag():
     controller = ApplicationController()
+    controller.license_service = TestLicenseService()
     controller._selected_customer = {"KUNDENNAME": "Firma", "CITY": "Berlin"}
     received = []
     controller.research_service.research = lambda company, city, force_refresh=False: (
@@ -134,6 +144,7 @@ def test_controller_single_refresh_sets_force_flag():
 
 def test_empty_refresh_worklist_is_reported():
     controller = ApplicationController()
+    controller.license_service = TestLicenseService()
     controller._current_dataframe = pd.DataFrame([
         {"KUNDENNAME": "Firma", "CITY": "Berlin", "STATUS": "Aktiv"}
     ])

@@ -1,6 +1,7 @@
 PySide6>=6.8
 pandas>=2.2
 openpyxl>=3.1
+xlrd>=2.0
 sqlalchemy>=2.0
 
 requests>=2.32
@@ -11,7 +12,9 @@ ddgs>=9.5
 rapidfuzz>=3.0
 python-dotenv>=1.0
 loguru>=0.7
+phonenumbers>=9.0
 
 playwright>=1.50
 
 pytest>=8.0
+cryptography>=42.0

@@ -23,7 +23,7 @@ env/
 .DS_Store
 
 # -------------------------
-# Python Cache
+# Python Cache / Tests
 # -------------------------
 .pytest_cache/
 .mypy_cache/
@@ -37,19 +37,24 @@ htmlcov/
 logs/
 
 # -------------------------
-# Umgebungsvariablen
+# Umgebungsvariablen / Schlüssel
 # -------------------------
 .env
+*.pem
+license_private_key*
+private/
 
 # -------------------------
-# Datenbank
+# Datenbank und Laufzeitdaten
 # -------------------------
 *.db
 *.sqlite
 *.sqlite3
 config/settings.json
 reports/*.json
-logs/
+license/
+*.kcl
+usage.json
 
 # -------------------------
 # Exporte
@@ -58,7 +63,7 @@ exports/*
 !exports/.gitkeep
 
 # -------------------------
-# Icons (optional Build-Dateien)
+# Icons
 # -------------------------
 icons/*.tmp
 
@@ -67,6 +72,9 @@ icons/*.tmp
 # -------------------------
 build/
 dist/
+release/dmg-root/
+release/*.dmg
+
 # PyInstaller spec files are versioned.
 
 # -------------------------

@@ -22,4 +22,4 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="KundenChecker", debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False)
-app = BUNDLE(exe, name="KundenChecker.app", bundle_identifier="de.mssoftware.kundenchecker", info_plist={"CFBundleShortVersionString": "1.0.0", "CFBundleVersion": "1.0.0", "NSHighResolutionCapable": True})
+app = BUNDLE(exe, name="KundenChecker.app", bundle_identifier="de.mssoftware.kundenchecker", info_plist={"CFBundleShortVersionString": "1.2.1", "CFBundleVersion": "1.2.1", "NSHighResolutionCapable": True})

@@ -13,7 +13,7 @@ class AppConfig:
     # --------------------------------------------------
 
     APP_NAME = "KundenChecker"
-    VERSION = "1.0.0"
+    VERSION = "1.2.1"
 
     WINDOW_WIDTH = 1500
     WINDOW_HEIGHT = 900
@@ -50,6 +50,7 @@ class AppConfig:
     CONTACT_MAX_PAGES = 5
     PHONE_MIN_DIGITS = 6
     PHONE_MAX_DIGITS = 15
+    DEFAULT_PHONE_REGION = "DE"
     CONTACT_PAGE_KEYWORDS = (
         "kontakt",
         "contact",
@@ -79,6 +80,8 @@ class AppConfig:
     # --------------------------------------------------
 
     DUPLICATE_THRESHOLD = 90
+
+    BACKUP_DIR = USER_DATA_DIR / "backups"
 
     # --------------------------------------------------
     # Export
