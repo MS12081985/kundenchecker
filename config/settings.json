@@ -18,5 +18,11 @@
   "window": {
     "width": 1500,
     "height": 900
+  },
+  "ui": {
+    "customer_splitter_sizes": [
+      46,
+      46
+    ]
   }
 }
