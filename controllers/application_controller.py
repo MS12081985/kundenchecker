@@ -16,6 +16,8 @@ from models.research_report import ResearchError, ResearchReport, build_change
 from models.dashboard_data import DashboardData
 import json
 import pandas as pd
+import shutil
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 
 class ApplicationController(QObject):
@@ -42,6 +44,11 @@ class ApplicationController(QObject):
     quit_requested = Signal()
     report_dialog_requested = Signal(object)
     dashboard_data_changed = Signal(object)
+    page_changed = Signal(int)
+    start_dialog_requested = Signal()
+    excel_file_dialog_requested = Signal()
+    reports_data_changed = Signal(object)
+    report_changes_changed = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -49,6 +56,8 @@ class ApplicationController(QObject):
         self.window = MainWindow()
         self.settings_store = Settings()
         self.settings = self.settings_store.load()
+        # Der Recherche-Service liest diese zentrale Laufzeitkonfiguration.
+        AppConfig.REQUEST_TIMEOUT = int(self.settings["research"].get("timeout", AppConfig.REQUEST_TIMEOUT))
         self.customer_service = CustomerService()
         self.research_service = ResearchService()
         self._current_dataframe = None
@@ -60,12 +69,17 @@ class ApplicationController(QObject):
         self._cancel_requested = False
         self._pending_research_worklist = None
         self._last_research_report = self._load_last_report()
+        self._report_filter = "all"
 
         self._connect_signals()
 
     def _connect_signals(self):
         self.window.excel_file_selected.connect(self.load_excel_file)
         self.window.export_requested.connect(self.request_export_file)
+        self.window.template_download_requested.connect(self.save_import_template)
+        self.window.start_open_excel_requested.connect(self.load_excel_from_dialog)
+        self.window.start_template_requested.connect(self.save_import_template)
+        self.window.start_dashboard_requested.connect(self.show_dashboard)
         self.window.export_file_selected.connect(self.export_customers)
         self.window.settings_requested.connect(self.show_settings)
         self.window.settings_changed.connect(self.save_settings)
@@ -79,6 +93,14 @@ class ApplicationController(QObject):
         self.window.marked_refresh_requested.connect(self.research_marked_refresh)
         self.window.inactive_refresh_requested.connect(self.research_inactive_refresh)
         self.window.report_requested.connect(self.show_last_report)
+        self.window.dashboard_navigation_requested.connect(self.show_dashboard)
+        self.window.customers_navigation_requested.connect(self.show_customers)
+        self.window.reports_navigation_requested.connect(self.show_reports)
+        self.window.shutdown_requested.connect(self.shutdown_application)
+        self.window.report_filter_changed.connect(self.set_report_filter)
+        self.window.report_reload_requested.connect(self.reload_last_report)
+        self.window.report_company_requested.connect(self.select_report_company)
+        self.window.report_detail_requested.connect(self.show_report_detail)
         self.window.report_export_file_selected.connect(self.export_research_report)
         self.window.research_filter_options_changed.connect(self.update_research_filter_counts)
         self.window.research_filter_accepted.connect(self.start_filtered_research)
@@ -109,7 +131,12 @@ class ApplicationController(QObject):
         )
         self.report_dialog_requested.connect(self.window.show_research_report)
         self.dashboard_data_changed.connect(self.window.set_dashboard_data)
+        self.page_changed.connect(self.window.set_page)
+        self.reports_data_changed.connect(self.window.set_reports_data)
+        self.report_changes_changed.connect(self.window.set_report_changes)
         self.window_requested.connect(self.window.show)
+        self.start_dialog_requested.connect(self.window.show_start_dialog)
+        self.excel_file_dialog_requested.connect(self.window._select_excel_file)
 
     def start(self):
         if self.settings["general"]["restore_window_size"]:
@@ -117,8 +144,95 @@ class ApplicationController(QObject):
             self.window_size_restore_requested.emit(window["width"], window["height"])
         self.status_changed.emit("Bereit")
         self._update_dashboard()
+        self.show_dashboard()
         logger.info("Dashboard geöffnet")
         self.window_requested.emit()
+        self.start_dialog_requested.emit()
+
+    @Slot()
+    def load_excel_from_dialog(self):
+        self.excel_file_dialog_requested.emit()
+
+    @Slot()
+    def show_dashboard(self):
+        logger.info("Navigation zur Dashboard-Seite")
+        self._update_dashboard()
+        self.page_changed.emit(0)
+
+    @Slot()
+    def show_customers(self):
+        logger.info("Navigation zur Kundenseite")
+        self.page_changed.emit(1)
+
+    @Slot()
+    def show_reports(self):
+        logger.info("Berichtsseite geöffnet")
+        self._publish_report_data()
+        self.page_changed.emit(2)
+
+    @Slot()
+    def shutdown_application(self):
+        if self._thread is None:
+            return
+        self._close_after_research = True
+        self.cancel_research()
+
+    def _publish_report_data(self):
+        report = self._last_research_report
+        if report is None:
+            self.reports_data_changed.emit({"summary": "Noch kein Recherchebericht vorhanden.", "changes": [], "visible_changes": []})
+            return
+        status = "Abgebrochen" if report.cancelled else ("Mit Fehlern" if report.errors else "Abgeschlossen")
+        summary = (f"Letzter Bericht: {report.processed} Firmen geprüft | {report.errors} Fehler | "
+                   f"Status: {status} | Dauer: {report.duration_seconds:.1f} s")
+        self.reports_data_changed.emit({"summary": summary, "changes": list(report.changes), "visible_changes": list(report.changes)})
+
+    @Slot(str)
+    def set_report_filter(self, filter_name):
+        self._report_filter = filter_name or "all"
+        report = self._last_research_report
+        changes = list(report.changes) if report else []
+        if filter_name == "changed": changes = [c for c in changes if c.changed_fields]
+        elif filter_name == "errors": changes = [c for c in changes if not c.success or c.error_message]
+        elif filter_name == "incomplete": changes = [c for c in changes if c.incomplete]
+        elif filter_name == "status_change": changes = [c for c in changes if c.old_status != c.new_status]
+        elif filter_name == "new_phone": changes = [c for c in changes if not c.old_phone and c.new_phone]
+        elif filter_name == "new_email": changes = [c for c in changes if not c.old_email and c.new_email]
+        elif filter_name == "website": changes = [c for c in changes if (not c.old_website and c.new_website) or (c.old_website and c.new_website and c.old_website != c.new_website)]
+        logger.info("Berichtfilter angewendet: {} ({} Einträge)", filter_name, len(changes))
+        self.report_changes_changed.emit(changes)
+        total = len(report.changes) if report else 0
+        self.status_changed.emit(f"Bericht: {len(changes)} von {total} Einträgen sichtbar")
+
+    @Slot()
+    def reload_last_report(self):
+        self._last_research_report = self._load_last_report()
+        self._close_after_research = False
+        self._publish_report_data()
+        logger.info("Letzter Bericht geladen")
+
+    @Slot(object)
+    def show_report_detail(self, values):
+        if values:
+            self.information_requested.emit("Berichtsdetail", "\n".join(str(v) for v in values))
+
+    @Slot(object)
+    def select_report_company(self, key):
+        if self._current_dataframe is None or self._current_dataframe.empty or len(key) < 2:
+            return
+        company, city = str(key[0]), str(key[1])
+        matches = (self._current_dataframe["KUNDENNAME"].astype(str) == company)
+        if "CITY" in self._current_dataframe.columns:
+            matches &= self._current_dataframe["CITY"].astype(str) == city
+        if not matches.any():
+            self.information_requested.emit("Recherchebericht", "Die Firma ist nicht in der Kundenliste vorhanden.")
+            return
+        self._active_search_text = ""
+        self._selected_customer = self._current_dataframe.loc[matches].iloc[0].to_dict()
+        self.customers_changed.emit(self._current_dataframe)
+        self.customer_details_changed.emit(self._selected_customer)
+        self.show_customers()
+        logger.info("Wechsel zur Kundenfirma aus Bericht: {}", company)
 
     def _update_dashboard(self):
         try:
@@ -183,6 +297,37 @@ class ApplicationController(QObject):
         export = self.settings["export"]
         self.export_file_dialog_requested.emit(export["directory"], export["format"])
 
+    @Slot()
+    def save_import_template(self):
+        source = AppConfig.IMPORT_TEMPLATE
+        if not source.exists():
+            logger.error("Importvorlage fehlt: {}", source)
+            self.error_requested.emit("Importvorlage", "Die Excel-Importvorlage ist nicht verfügbar.")
+            return
+        directory = self.settings.get("export", {}).get("directory") or str(Path.home() / "Downloads")
+        filename, _ = QFileDialog.getSaveFileName(
+            self.window, "Excel-Importvorlage speichern", str(Path(directory) / source.name), "Excel-Datei (*.xlsx)"
+        )
+        if not filename:
+            return
+        target = Path(filename)
+        if target.suffix.lower() != ".xlsx":
+            target = target.with_suffix(".xlsx")
+        if target.exists():
+            answer = QMessageBox.question(self.window, "Datei überschreiben", f"{target.name} existiert bereits. Überschreiben?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer != QMessageBox.Yes:
+                return
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        except OSError as error:
+            logger.exception("Importvorlage konnte nicht gespeichert werden: {}", error)
+            self.error_requested.emit("Importvorlage", "Die Importvorlage konnte nicht gespeichert werden.")
+            return
+        logger.info("Excel-Importvorlage gespeichert: {}", target)
+        self.status_changed.emit("Excel-Importvorlage gespeichert.")
+        self.information_requested.emit("Importvorlage", f"Die Vorlage wurde gespeichert unter:\n{target}")
+
     @Slot(str)
     def load_excel_file(self, filename):
         logger.info("Schnellaktion Excel öffnen ausgelöst")
@@ -195,12 +340,17 @@ class ApplicationController(QObject):
         self._selected_customer = None
         self._active_search_text = ""
         self.customer_service.set_dataframe(dataframe)
+        if "CITY" not in dataframe.columns:
+            self.information_requested.emit(
+                "Excel-Import",
+                "Die Spalte CITY fehlt. Der Import wird fortgesetzt, Recherchen können dadurch ungenauer sein.",
+            )
         self._current_dataframe = self.customer_service.get_dataframe()
         self.customers_changed.emit(self._current_dataframe)
         self.customer_details_changed.emit(None)
         self.customer_count_changed.emit(self.customer_service.row_count())
         self.visible_count_changed.emit(len(self._current_dataframe), len(self._current_dataframe))
-        self.window.show_customers_page()
+        self.show_customers()
         self._update_dashboard()
         self.status_changed.emit("Excel-Datei geladen.")
 
@@ -712,10 +862,7 @@ class ApplicationController(QObject):
 
     @Slot()
     def show_last_report(self):
-        if self._last_research_report is None:
-            self.information_requested.emit("Recherchebericht", "Es liegt noch kein Recherchebericht vor.")
-            return
-        self.report_dialog_requested.emit(self._last_research_report)
+        self.show_reports()
 
     @Slot(str, str)
     def export_research_report(self, filename, selected_filter):
@@ -723,7 +870,18 @@ class ApplicationController(QObject):
         if report is None:
             return
         try:
-            changes = [vars(change) for change in report.changes]
+            changes = list(report.changes)
+            if self._report_filter != "all":
+                self.set_report_filter(self._report_filter)
+                changes = list(report.changes)
+                if self._report_filter == "changed": changes = [c for c in changes if c.changed_fields]
+                elif self._report_filter == "errors": changes = [c for c in changes if not c.success or c.error_message]
+                elif self._report_filter == "incomplete": changes = [c for c in changes if c.incomplete]
+                elif self._report_filter == "status_change": changes = [c for c in changes if c.old_status != c.new_status]
+                elif self._report_filter == "new_phone": changes = [c for c in changes if not c.old_phone and c.new_phone]
+                elif self._report_filter == "new_email": changes = [c for c in changes if not c.old_email and c.new_email]
+                elif self._report_filter == "website": changes = [c for c in changes if (not c.old_website and c.new_website) or (c.old_website and c.new_website and c.old_website != c.new_website)]
+            changes = [vars(change) for change in changes]
             changes_df = pd.DataFrame(changes)
             if filename.lower().endswith(".csv") or "CSV" in selected_filter:
                 changes_df.to_csv(filename, index=False, encoding="utf-8-sig")
@@ -757,3 +915,6 @@ class ApplicationController(QObject):
             self._thread.deleteLater()
         self._worker = None
         self._thread = None
+        if self._close_after_research:
+            self._close_after_research = False
+            self.window.close()

@@ -9,6 +9,7 @@ class MainMenu(QObject):
 
     open_requested = Signal()
     export_requested = Signal()
+    template_download_requested = Signal()
     settings_requested = Signal()
     exit_requested = Signal()
 
@@ -46,6 +47,10 @@ class MainMenu(QObject):
         )
 
         file_menu.addAction(open_action)
+
+        template_action = QAction("Excel-Importvorlage speichern", self)
+        template_action.triggered.connect(self.template_download_requested.emit)
+        file_menu.addAction(template_action)
 
         export_action = QAction("Exportieren...", self)
         export_action.triggered.connect(self.export_requested.emit)

@@ -48,10 +48,8 @@ class CustomerTable(QTableView):
         header = self.horizontalHeader()
 
         header.setStretchLastSection(True)
-
-        header.setSectionResizeMode(
-            QHeaderView.ResizeToContents
-        )
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setDefaultSectionSize(150)
 
         # Linke Zeilennummern anzeigen
         self.verticalHeader().setVisible(True)

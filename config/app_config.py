@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 
 class AppConfig:
@@ -12,7 +13,7 @@ class AppConfig:
     # --------------------------------------------------
 
     APP_NAME = "KundenChecker"
-    VERSION = "0.7.8"
+    VERSION = "1.0.0"
 
     WINDOW_WIDTH = 1500
     WINDOW_HEIGHT = 900
@@ -22,11 +23,17 @@ class AppConfig:
     # --------------------------------------------------
 
     BASE_DIR = Path(__file__).resolve().parent.parent
+    RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", BASE_DIR))
+    USER_DATA_DIR = Path.home() / "Library" / "Application Support" / APP_NAME
+    RUNTIME_DIR = USER_DATA_DIR if getattr(sys, "frozen", False) else BASE_DIR
 
-    DATABASE_DIR = BASE_DIR / "database"
-    EXPORT_DIR = BASE_DIR / "exports"
-    REPORT_DIR = BASE_DIR / "reports"
+    DATABASE_DIR = RUNTIME_DIR / "database"
+    EXPORT_DIR = RUNTIME_DIR / "exports"
+    RESOURCE_DIR = RESOURCE_ROOT / "resources"
+    IMPORT_TEMPLATE = RESOURCE_DIR / "templates" / "KundenChecker_Importvorlage.xlsx"
+    REPORT_DIR = RUNTIME_DIR / "reports"
     ICON_DIR = BASE_DIR / "icons"
+    SETTINGS_FILE = RUNTIME_DIR / "config" / "settings.json"
 
     # --------------------------------------------------
     # Datenbank
@@ -91,5 +98,10 @@ class AppConfig:
 
         cls.DATABASE_DIR.mkdir(exist_ok=True)
         cls.EXPORT_DIR.mkdir(exist_ok=True)
+        cls.RESOURCE_DIR.mkdir(exist_ok=True)
         cls.REPORT_DIR.mkdir(exist_ok=True)
         cls.ICON_DIR.mkdir(exist_ok=True)
+
+    @classmethod
+    def resource_path(cls, relative_path):
+        return cls.RESOURCE_ROOT / relative_path
