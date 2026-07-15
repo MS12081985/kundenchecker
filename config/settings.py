@@ -36,7 +36,7 @@ class Settings:
     }
 
     def __init__(self, path=None):
-        self.path = Path(path) if path else AppConfig.BASE_DIR / "config" / "settings.json"
+        self.path = Path(path) if path else AppConfig.SETTINGS_FILE
 
     def load(self):
         if not self.path.exists():

@@ -2,6 +2,7 @@ from PySide6.QtCore import (
     QItemSelectionModel,
     QModelIndex,
     QSignalBlocker,
+    Qt,
     Signal,
     Slot,
 )
@@ -10,6 +11,9 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QLineEdit,
     QMainWindow,
+    QPushButton,
+    QHBoxLayout,
+    QFrame,
     QStackedWidget,
     QMessageBox,
     QSplitter,
@@ -24,10 +28,13 @@ from ui.statusbar import MainStatusBar
 from ui.table_model import CustomerTableModel
 from ui.toolbar import Toolbar as MainToolbar
 from ui.dashboard import Dashboard
+from config.app_config import AppConfig
 from widgets.progress_dialog import ProgressDialog
 from widgets.research_filter_dialog import ResearchFilterDialog
 from widgets.settings_dialog import SettingsDialog
 from widgets.research_report_dialog import ResearchReportDialog
+from widgets.start_dialog import StartDialog
+from ui.reports_page import ReportsPage
 
 
 class MainWindow(QMainWindow):
@@ -36,6 +43,10 @@ class MainWindow(QMainWindow):
     excel_file_selected = Signal(str)
     export_file_selected = Signal(str, str)
     export_requested = Signal()
+    template_download_requested = Signal()
+    start_open_excel_requested = Signal()
+    start_template_requested = Signal()
+    start_dashboard_requested = Signal()
     settings_requested = Signal()
     settings_changed = Signal(object)
     window_size_changed = Signal(int, int)
@@ -58,6 +69,15 @@ class MainWindow(QMainWindow):
     dashboard_data_changed = Signal(object)
     dashboard_requested = Signal()
     customers_page_requested = Signal()
+    dashboard_navigation_requested = Signal()
+    customers_navigation_requested = Signal()
+    shutdown_requested = Signal()
+    reports_navigation_requested = Signal()
+    report_filter_changed = Signal(str)
+    report_reload_requested = Signal()
+    report_page_export_requested = Signal()
+    report_detail_requested = Signal(object)
+    report_company_requested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,8 +93,7 @@ class MainWindow(QMainWindow):
     def _build_ui(self):
         self.main_menu = MainMenu(self)
         self.main_toolbar = MainToolbar(self)
-        self.addToolBarBreak()
-        self.addToolBar(self._create_toolbar_container())
+        self.navigation_bar = self._create_navigation_bar()
 
         self.dashboard = Dashboard(self)
         self.table_model = CustomerTableModel()
@@ -104,30 +123,69 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget(self)
         self.stack.addWidget(self.dashboard)
         self.stack.addWidget(self.customers_page)
-        self.setCentralWidget(self.stack)
+        self.reports_page = ReportsPage(self)
+        self.stack.addWidget(self.reports_page)
+        self.action_bar = QWidget(self)
+        action_layout = QVBoxLayout(self.action_bar)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(8)
+        action_layout.addWidget(self.navigation_bar)
+        action_layout.addWidget(self.main_toolbar)
+
+        root = QWidget(self)
+        root_layout = QVBoxLayout(root)
+        root_layout.setContentsMargins(8, 8, 8, 8)
+        root_layout.setSpacing(8)
+        root_layout.addWidget(self.action_bar)
+        root_layout.addWidget(self.stack, 1)
+        self.setCentralWidget(root)
         self._install_navigation()
 
         self.main_statusbar = MainStatusBar(self)
         self.setStatusBar(self.main_statusbar)
 
-    def _create_toolbar_container(self):
-        """Bindet die vorhandene QWidget-Toolbar in QMainWindow ein."""
-        from PySide6.QtWidgets import QToolBar
-
-        toolbar = QToolBar("Aktionen", self)
-        toolbar.setMovable(False)
-        toolbar.addWidget(self.main_toolbar)
-        return toolbar
+    def _create_navigation_bar(self):
+        navigation = QWidget(self)
+        layout = QHBoxLayout(navigation)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        self.dashboard_nav_button = QPushButton("🏠 Dashboard", self)
+        self.dashboard_nav_button.setToolTip("Zur Dashboard-Übersicht wechseln")
+        self.dashboard_nav_button.setCheckable(True)
+        self.customers_nav_button = QPushButton("👥 Kunden", self)
+        self.customers_nav_button.setToolTip("Zur Kundenliste wechseln")
+        self.customers_nav_button.setCheckable(True)
+        self.reports_nav_button = QPushButton("📊 Berichte", self)
+        self.reports_nav_button.setToolTip("Rechercheberichte anzeigen")
+        self.reports_nav_button.setCheckable(True)
+        style = "QPushButton:checked { background-color: palette(highlight); color: palette(highlighted-text); font-weight: bold; }"
+        self.dashboard_nav_button.setStyleSheet(style)
+        self.customers_nav_button.setStyleSheet(style)
+        self.reports_nav_button.setStyleSheet(style)
+        self.dashboard_nav_button.clicked.connect(self.dashboard_navigation_requested)
+        self.customers_nav_button.clicked.connect(self.customers_navigation_requested)
+        self.reports_nav_button.clicked.connect(self.reports_navigation_requested)
+        layout.addWidget(self.dashboard_nav_button)
+        layout.addWidget(self.customers_nav_button)
+        layout.addWidget(self.reports_nav_button)
+        return navigation
 
     def _connect_ui_signals(self):
         self.dashboard.open_excel_requested.connect(self._select_excel_file)
-        self.dashboard.customers_requested.connect(self.show_customers_page)
+        self.dashboard.customers_requested.connect(self.customers_navigation_requested)
         self.dashboard.bulk_check_requested.connect(self.bulk_check_requested)
         self.dashboard.inactive_refresh_requested.connect(self.inactive_refresh_requested)
         self.dashboard.report_requested.connect(self.report_requested)
         self.dashboard.export_requested.connect(self.export_requested)
+        self.reports_page.filter_changed.connect(self.report_filter_changed)
+        self.reports_page.reload_requested.connect(self.report_reload_requested)
+        self.reports_page.export_requested.connect(self.report_page_export_requested)
+        self.reports_page.detail_requested.connect(self.report_detail_requested)
+        self.reports_page.company_requested.connect(self.report_company_requested)
+        self.report_page_export_requested.connect(self._select_report_export_file)
         self.main_menu.open_requested.connect(self._select_excel_file)
         self.main_menu.export_requested.connect(self.export_requested)
+        self.main_menu.template_download_requested.connect(self.template_download_requested)
         self.main_menu.settings_requested.connect(self.settings_requested)
         self.main_menu.exit_requested.connect(self.quit_requested)
         self.main_menu.duplicate_requested.connect(self.duplicates_requested)
@@ -161,9 +219,10 @@ class MainWindow(QMainWindow):
 
     def _install_navigation(self):
         view_menu = self.menuBar().addMenu("&Ansicht")
-        dashboard_action = QAction("Dashboard", self); dashboard_action.setShortcut(QKeySequence("Ctrl+1")); dashboard_action.triggered.connect(self.show_dashboard_page)
-        customers_action = QAction("Kunden", self); customers_action.setShortcut(QKeySequence("Ctrl+2")); customers_action.triggered.connect(self.show_customers_page)
-        view_menu.addAction(dashboard_action); view_menu.addAction(customers_action)
+        dashboard_action = QAction("Dashboard", self); dashboard_action.setShortcut(QKeySequence("Ctrl+1")); dashboard_action.triggered.connect(self.dashboard_navigation_requested)
+        customers_action = QAction("Kunden", self); customers_action.setShortcut(QKeySequence("Ctrl+2")); customers_action.triggered.connect(self.customers_navigation_requested)
+        reports_action = QAction("Berichte", self); reports_action.setShortcut(QKeySequence("Ctrl+3")); reports_action.triggered.connect(self.reports_navigation_requested)
+        view_menu.addAction(dashboard_action); view_menu.addAction(customers_action); view_menu.addAction(reports_action)
         search_action = QAction("Suche fokussieren", self); search_action.setShortcut(QKeySequence("Ctrl+F")); search_action.triggered.connect(self.search_field.setFocus)
         open_action = QAction("Excel öffnen", self); open_action.setShortcut(QKeySequence("Ctrl+O")); open_action.triggered.connect(self._select_excel_file)
         export_action = QAction("Export", self); export_action.setShortcut(QKeySequence("Ctrl+E")); export_action.triggered.connect(self.export_requested)
@@ -171,15 +230,35 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def show_dashboard_page(self):
-        self.stack.setCurrentWidget(self.dashboard)
+        self.dashboard_navigation_requested.emit()
 
     @Slot()
     def show_customers_page(self):
-        self.stack.setCurrentWidget(self.customers_page)
+        self.customers_navigation_requested.emit()
+
+    @Slot()
+    def show_reports_page(self):
+        self.reports_navigation_requested.emit()
+
+    @Slot(int)
+    def set_page(self, index):
+        self.stack.setCurrentIndex(index)
+        dashboard = index == 0
+        self.dashboard_nav_button.setChecked(dashboard)
+        self.customers_nav_button.setChecked(index == 1)
+        self.reports_nav_button.setChecked(index == 2)
 
     @Slot(object)
     def set_dashboard_data(self, data):
         self.dashboard.set_data(data)
+
+    @Slot(object)
+    def set_reports_data(self, data):
+        self.reports_page.set_report_data(data)
+
+    @Slot(object)
+    def set_report_changes(self, changes):
+        self.reports_page.set_filtered_changes(changes)
 
     @Slot()
     def _select_excel_file(self):
@@ -228,6 +307,26 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(settings, defaults, self)
         dialog.settings_saved.connect(self.settings_changed)
         dialog.exec()
+
+    @Slot()
+    def show_start_dialog(self):
+        self.start_dialog = StartDialog(AppConfig.VERSION, self)
+        self.start_dialog.open_excel_requested.connect(self._start_open_excel)
+        self.start_dialog.template_requested.connect(self._start_template)
+        self.start_dialog.dashboard_requested.connect(self._start_dashboard)
+        self.start_dialog.exec()
+
+    def _start_open_excel(self):
+        self.start_dialog.accept()
+        self.start_open_excel_requested.emit()
+
+    def _start_template(self):
+        self.start_dialog.accept()
+        self.start_template_requested.emit()
+
+    def _start_dashboard(self):
+        self.start_dialog.accept()
+        self.start_dashboard_requested.emit()
 
     @Slot(int, int)
     def restore_window_size(self, width, height):
@@ -394,5 +493,17 @@ class MainWindow(QMainWindow):
             self.research_filter_confirmed.emit(options, force_refresh)
 
     def closeEvent(self, event):
+        if self.progress_dialog is not None:
+            answer = QMessageBox.question(
+                self,
+                "Recherche läuft",
+                "Die Recherche läuft noch. Möchten Sie sie abbrechen und die Anwendung schließen?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer == QMessageBox.Yes:
+                self.shutdown_requested.emit()
+            event.ignore()
+            return
         self.window_size_changed.emit(self.width(), self.height())
         super().closeEvent(event)

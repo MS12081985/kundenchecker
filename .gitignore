@@ -47,6 +47,9 @@ logs/
 *.db
 *.sqlite
 *.sqlite3
+config/settings.json
+reports/*.json
+logs/
 
 # -------------------------
 # Exporte
@@ -64,7 +67,7 @@ icons/*.tmp
 # -------------------------
 build/
 dist/
-*.spec
+# PyInstaller spec files are versioned.
 
 # -------------------------
 # IDE

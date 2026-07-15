@@ -3,6 +3,9 @@ from PySide6.QtWidgets import (
     QWidget,
     QPushButton,
     QHBoxLayout,
+    QVBoxLayout,
+    QFrame,
+    QSizePolicy,
 )
 
 
@@ -27,10 +30,11 @@ class Toolbar(QWidget):
 
     def build_ui(self):
 
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
 
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(10)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(6)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self.btn_open = QPushButton("📂 Excel öffnen")
         self.btn_search = QPushButton("🔍 Firma prüfen")
@@ -41,17 +45,46 @@ class Toolbar(QWidget):
         self.btn_duplicate = QPushButton("🧾 Dubletten")
         self.btn_export = QPushButton("📤 Export")
 
-        layout.addWidget(self.btn_open)
-        layout.addWidget(self.btn_search)
-        layout.addWidget(self.btn_refresh)
-        layout.addWidget(self.btn_bulk)
-        layout.addWidget(self.btn_marked_refresh)
-        layout.addWidget(self.btn_inactive_refresh)
-        layout.addWidget(self.btn_duplicate)
+        buttons = (
+            (self.btn_open, "Excel-Datei öffnen"),
+            (self.btn_search, "Ausgewählte Firma prüfen"),
+            (self.btn_refresh, "Ausgewählte Firma erneut prüfen"),
+            (self.btn_bulk, "Alle Firmen prüfen"),
+            (self.btn_marked_refresh, "Markierte Firmen erneut prüfen"),
+            (self.btn_inactive_refresh, "Nicht aktive Firmen erneut prüfen"),
+            (self.btn_duplicate, "Dubletten finden"),
+            (self.btn_export, "Aktuelle Tabelle exportieren"),
+        )
+        for button, tooltip in buttons:
+            button.setToolTip(tooltip)
+            button.setMinimumHeight(32)
+            button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
-        layout.addStretch()
+        def separator():
+            line = QFrame(self)
+            line.setFrameShape(QFrame.VLine)
+            line.setFrameShadow(QFrame.Sunken)
+            line.setFixedWidth(1)
+            return line
 
-        layout.addWidget(self.btn_export)
+        row_one = QHBoxLayout()
+        row_one.setSpacing(6)
+        row_one.addWidget(self.btn_open)
+        row_one.addWidget(self.btn_search)
+        row_one.addWidget(self.btn_refresh)
+        row_one.addWidget(self.btn_bulk)
+
+        row_two = QHBoxLayout()
+        row_two.setSpacing(6)
+        row_two.addWidget(self.btn_marked_refresh)
+        row_two.addWidget(self.btn_inactive_refresh)
+        row_two.addWidget(separator())
+        row_two.addWidget(self.btn_duplicate)
+        row_two.addWidget(separator())
+        row_two.addWidget(self.btn_export)
+
+        layout.addLayout(row_one)
+        layout.addLayout(row_two)
 
         self.btn_open.clicked.connect(
             self.open_requested.emit

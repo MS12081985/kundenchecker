@@ -1,5 +1,6 @@
 import sqlite3
 from pathlib import Path
+from config.app_config import AppConfig
 
 
 class Database:
@@ -9,7 +10,7 @@ class Database:
 
     def __init__(self):
 
-        db_folder = Path("database")
+        db_folder = AppConfig.DATABASE_DIR
         db_folder.mkdir(exist_ok=True)
 
         self.db_path = db_folder / "kundenchecker.db"

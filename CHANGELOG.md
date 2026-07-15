@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.0.0
+
+- Erste installierbare macOS-App als PyInstaller-Bundle vorbereitet.
+- Importvorlage und unveränderliche Ressourcen werden ins Bundle aufgenommen.
+- Schreibbare Daten werden in der macOS-App im Application-Support-Verzeichnis abgelegt.
+
+## 0.9.0
+
+- Moderner Startdialog bei jedem Programmstart mit Excel-, Vorlage- und Dashboard-Aktion.
+
+- Excel-Importvorlage im Programm speicherbar.
+- Import prüft die Pflichtspalte `KUNDENNAME`.
+
+- Stabilisierung der UI- und Tabellenansicht.
+- NaN-Werte werden leer dargestellt und als Tooltips verfügbar gemacht.
+- Tabellenbreiten werden nicht mehr bei jedem Inhalt automatisch neu berechnet.
+- Recherche-Timeout wird aus den Einstellungen zur Laufzeit angewendet.
+
+## 0.8.2
+
+- Rechercheberichte als eigene Hauptseite ergänzt.
+- Berichtfilter, Detailansicht und Firmenwechsel hinzugefügt.
+- Berichtsnavigation über Toolbar, Menü und Ctrl/Cmd+3.
+
+## 0.8.1
+
+- Permanente Dashboard-/Kunden-Navigation in der Toolbar ergänzt.
+- Zentraler Seitenwechsel über den ApplicationController.
+- Fensteranzeige beim Start bleibt unabhängig von der Navigation.
+
 ## 0.8.0
 
 - Neues Dashboard mit Statuskarten, Kennzahlen und Schnellaktionen.

@@ -4,6 +4,7 @@ from PySide6.QtCore import (
     QModelIndex
 )
 from PySide6.QtGui import QColor
+import math
 
 
 class CustomerTableModel(QAbstractTableModel):
@@ -44,7 +45,7 @@ class CustomerTableModel(QAbstractTableModel):
 
         return len(self._df.columns)
 
-    def data(self, index, role=Qt.DisplayRole):
+    def _data(self, index, role=Qt.DisplayRole):
 
         if not index.isValid():
             return None
@@ -71,10 +72,18 @@ class CustomerTableModel(QAbstractTableModel):
             index.column()
         ]
 
-        if value is None:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
             return ""
 
         return str(value)
+
+    def data(self, index, role=Qt.DisplayRole):
+        if role == Qt.ToolTipRole and index.isValid() and self._df is not None:
+            value = self._df.iat[index.row(), index.column()]
+            if value is None or (isinstance(value, float) and math.isnan(value)):
+                return ""
+            return str(value)
+        return self._data(index, role)
 
     def headerData(
         self,

@@ -134,3 +134,31 @@ Die manuelle Website-Prüfung kann separat gestartet werden:
 ```bash
 python manual_website_check.py
 ```
+
+Rechercheberichte sind über die Hauptnavigation als eigene Seite mit Filtern,
+Detailansicht und Export erreichbar.
+
+Über **Datei → Excel-Importvorlage speichern** kann die Importvorlage kopiert werden.
+`KUNDENNAME` ist eine Pflichtspalte, `CITY` wird für präzisere Recherchen empfohlen.
+Die Beispielzeile sollte vor dem Import gelöscht werden.
+
+## Installation und Start
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python app.py
+```
+
+Automatisierte Tests:
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+## macOS-App
+
+Der lokale Build erzeugt mit `scripts/build_macos.sh` eine nicht signierte
+`dist/KundenChecker.app` und `release/KundenChecker-1.0.0.dmg`. Beim ersten
+Start kann macOS einen Sicherheitshinweis anzeigen; dann per Rechtsklick →
+Öffnen starten. Für die lokale App gelten die Hinweise in `BUILDING.md`.
