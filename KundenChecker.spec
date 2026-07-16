@@ -40,4 +40,4 @@ collection = COLLECT(
     upx=False,
     name="KundenChecker",
 )
-app = BUNDLE(collection, name="KundenChecker.app", bundle_identifier="de.mssoftware.kundenchecker", info_plist={"CFBundleShortVersionString": "1.3.0", "CFBundleVersion": "1.3.0", "NSHighResolutionCapable": True})
+app = BUNDLE(collection, name="KundenChecker.app", bundle_identifier="de.mssoftware.kundenchecker", info_plist={"CFBundleShortVersionString": "1.3.2", "CFBundleVersion": "1.3.2", "NSHighResolutionCapable": True})

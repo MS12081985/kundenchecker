@@ -41,7 +41,7 @@ class MainStatusBar(QStatusBar):
             self.count_label.setText(f"{count} Kunden")
 
     def set_visible_count(self, visible: int, total: int):
-        self.count_label.setText(f"{visible} von {total} Datensätzen sichtbar")
+        self.count_label.setText(f"{visible} von {total} Kunden sichtbar")
 
     def set_progress(self, current: int, total: int):
         """

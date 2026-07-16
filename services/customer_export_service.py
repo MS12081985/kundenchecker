@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-import math
 from models.address_utils import POSTAL_CODE_COLUMNS, normalize_postal_code
+from models.customer_status import normalize_customer_status, status_mask
 
 EXPORT_SCOPES = {
     "visible": None,
-    "complete": {"vollständig"},
-    "active": {"aktiv"},
-    "contactable": {"vollständig", "aktiv"},
-    "inactive": {"nicht aktiv"},
-    "not_found": {"nicht gefunden"},
+    "complete": "complete",
+    "active": "active",
+    "contactable": "complete_or_active",
+    "inactive": "inactive",
+    "not_found": "not_found",
     "selected": None,
     "all_loaded": None,
 }
@@ -31,13 +31,15 @@ ENRICHMENT_COLUMNS = (
     "SOCIAL_YOUTUBE", "SOCIAL_TIKTOK", "SOCIAL_X", "SOCIAL_PINTEREST",
     "HAS_IMPRINT", "IMPRINT_URL", "HAS_PRIVACY_POLICY", "PRIVACY_URL",
     "CONTACT_FORM_URL", "SHORT_DESCRIPTION", "ANALYZED_AT", "ENRICHMENT_STATUS", "ENRICHMENT_ERROR",
+    "IMPRINT_OWNER_NAMES", "IMPRINT_MANAGING_DIRECTOR_NAMES", "IMPRINT_REPRESENTATIVE_NAMES",
+    "IMPRINT_LEGAL_FORM", "IMPRINT_COMPANY_NAME", "IMPRINT_STREET", "IMPRINT_HOUSE_NUMBER", "IMPRINT_POSTAL_CODE",
+    "IMPRINT_CITY", "IMPRINT_COUNTRY", "IMPRINT_PHONE", "IMPRINT_EMAIL", "IMPRINT_VAT_ID",
+    "IMPRINT_REGISTER_TYPE", "IMPRINT_REGISTER_NUMBER", "IMPRINT_REGISTER_COURT",
+    "IMPRINT_CONFIDENCE", "IMPRINT_ANALYZED_AT",
 )
 
 
-def normalize_status(value) -> str:
-    if value is None or (isinstance(value, float) and math.isnan(value)):
-        return ""
-    return str(value).strip().casefold()
+normalize_status = normalize_customer_status
 
 
 class CustomerExportService:
@@ -55,11 +57,11 @@ class CustomerExportService:
                 return frame.iloc[0:0].copy()
             mask = frame.apply(lambda row: (str(row.get("KUNDENNAME", "")), str(row.get("CITY", ""))) in keys, axis=1)
             return frame.loc[mask].reset_index(drop=True)
-        statuses = EXPORT_SCOPES[scope]
-        if statuses is not None:
+        status_filter = EXPORT_SCOPES[scope]
+        if status_filter is not None:
             if "STATUS" not in frame.columns:
                 return frame.iloc[0:0].copy()
-            mask = frame["STATUS"].map(normalize_status).isin(statuses)
+            mask = status_mask(frame["STATUS"], status_filter)
             return frame.loc[mask].reset_index(drop=True)
         return frame.reset_index(drop=True)
 

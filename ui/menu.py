@@ -25,6 +25,12 @@ class MainMenu(QObject):
     enrichment_requested = Signal()
     enrichment_marked_requested = Signal()
     enrichment_missing_requested = Signal()
+    import_report_requested = Signal()
+    enrichment_refresh_requested = Signal()
+    report_reload_requested = Signal()
+    report_export_requested = Signal()
+    report_detail_requested = Signal()
+    report_company_requested = Signal()
 
     about_requested = Signal()
     log_directory_requested = Signal()
@@ -50,6 +56,7 @@ class MainMenu(QObject):
         file_menu = menubar.addMenu("&Datei")
 
         open_action = QAction("Excel öffnen...", self)
+        open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(
             self.open_requested.emit
         )
@@ -61,6 +68,7 @@ class MainMenu(QObject):
         file_menu.addAction(template_action)
 
         export_action = QAction("Exportieren...", self)
+        export_action.setShortcut("Ctrl+E")
         export_action.triggered.connect(self.export_requested.emit)
         file_menu.addAction(export_action)
 
@@ -94,6 +102,15 @@ class MainMenu(QObject):
         phone_action = QAction("Telefonnummern neu validieren", self)
         phone_action.triggered.connect(self.phone_cleanup_requested.emit)
         extras_menu.addAction(phone_action)
+        import_report_action = QAction("Importbericht anzeigen", self)
+        import_report_action.triggered.connect(self.import_report_requested.emit)
+        extras_menu.addAction(import_report_action)
+        import_check_action = QAction("Excel-Importprüfung öffnen", self)
+        import_check_action.triggered.connect(self.open_requested.emit)
+        extras_menu.addAction(import_check_action)
+        enrichment_refresh_action = QAction("Websiteanalyse erneut durchführen", self)
+        enrichment_refresh_action.triggered.connect(self.enrichment_refresh_requested.emit)
+        extras_menu.addAction(enrichment_refresh_action)
 
         # -------------------------------------------------
         # Recherche
@@ -142,7 +159,7 @@ class MainMenu(QObject):
         report_action.triggered.connect(self.report_requested.emit)
         research_menu.addAction(report_action)
         research_menu.addSeparator()
-        enrichment_action = QAction("Websites analysieren...", self)
+        enrichment_action = QAction("Alle Websites analysieren", self)
         enrichment_action.triggered.connect(self.enrichment_requested.emit)
         research_menu.addAction(enrichment_action)
         marked_enrichment_action = QAction("Markierte Websites analysieren", self)
@@ -151,6 +168,34 @@ class MainMenu(QObject):
         missing_enrichment_action = QAction("Nicht analysierte Websites analysieren", self)
         missing_enrichment_action.triggered.connect(self.enrichment_missing_requested.emit)
         research_menu.addAction(missing_enrichment_action)
+
+        self.actions = {
+            "open": open_action,
+            "export": export_action,
+            "research": company_action,
+            "research_refresh": refresh_action,
+            "bulk": bulk_action,
+            "marked_refresh": marked_action,
+            "inactive_refresh": inactive_action,
+            "enrichment_all": enrichment_action,
+            "enrichment_marked": marked_enrichment_action,
+            "enrichment_missing": missing_enrichment_action,
+            "duplicates": duplicate_action,
+            "phone_cleanup": phone_action,
+            "import_report": import_report_action,
+            "import_check": import_check_action,
+            "enrichment_refresh": enrichment_refresh_action,
+        }
+
+        for key, text, signal in (
+            ("report_reload", "Bericht neu laden", self.report_reload_requested),
+            ("report_export", "Bericht exportieren", self.report_export_requested),
+            ("report_detail", "Detail anzeigen", self.report_detail_requested),
+            ("report_company", "Zur Firma wechseln", self.report_company_requested),
+        ):
+            action = QAction(text, self)
+            action.triggered.connect(signal.emit)
+            self.actions[key] = action
 
         settings_menu = menubar.addMenu("&Einstellungen")
         settings_action = QAction("Einstellungen...", self)

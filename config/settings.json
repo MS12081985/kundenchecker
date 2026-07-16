@@ -12,7 +12,9 @@
   },
   "research": {
     "timeout": 15,
-    "auto_save_sqlite": true
+    "auto_save_sqlite": true,
+    "use_street_matching": false,
+    "offer_enrichment_after_research": true
   },
   "export": {
     "directory": "/Users/marcspringer/Projekte/kundenchecker/exports",
@@ -27,8 +29,8 @@
   },
   "ui": {
     "customer_splitter_sizes": [
-      48,
-      48
+      806,
+      555
     ]
   }
 }

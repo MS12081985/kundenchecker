@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Any
+from models.imprint_data import ImprintData
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,7 @@ class EnrichmentResult:
     ssl_valid: bool = False
     has_imprint: bool = False
     imprint_url: str = ""
+    imprint_data: ImprintData = field(default_factory=ImprintData)
     has_privacy_policy: bool = False
     privacy_url: str = ""
     has_contact_page: bool = False
@@ -121,5 +123,6 @@ class EnrichmentResult:
         payload["opening_hours"] = OpeningHoursData(**hours)
         payload["social_media"] = SocialMediaLinks(**(payload.get("social_media") or {}))
         payload["industry"] = IndustryResult(**(payload.get("industry") or {}))
+        payload["imprint_data"] = ImprintData.from_dict(payload.get("imprint_data"))
         payload["description_sources"] = tuple(payload.get("description_sources") or ())
         return cls(**payload)

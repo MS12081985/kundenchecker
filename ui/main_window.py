@@ -36,6 +36,7 @@ from ui.toolbar import Toolbar as MainToolbar
 from ui.dashboard import Dashboard
 from config.app_config import AppConfig
 from ui.reports_page import ReportsPage
+from models.customer_status import STATUS_FILTER_LABELS
 
 
 class MainWindow(QMainWindow):
@@ -74,6 +75,7 @@ class MainWindow(QMainWindow):
     quit_requested = Signal()
     dashboard_data_changed = Signal(object)
     dashboard_requested = Signal()
+    dashboard_status_filter_requested = Signal(str)
     customers_page_requested = Signal()
     dashboard_navigation_requested = Signal()
     customers_navigation_requested = Signal()
@@ -85,6 +87,7 @@ class MainWindow(QMainWindow):
     report_detail_requested = Signal(object)
     report_company_requested = Signal(object)
     enrichment_options_requested = Signal()
+    enrichment_options_changed = Signal(object)
     enrichment_options_selected = Signal(object)
     enrichment_confirmed = Signal(object, bool)
     enrichment_selected_requested = Signal(bool)
@@ -93,6 +96,7 @@ class MainWindow(QMainWindow):
     enrichment_details_requested = Signal()
     enrichment_url_requested = Signal(str)
     enrichment_filter_changed = Signal(object)
+    post_research_enrichment_decided = Signal(bool, bool, bool)
     weak_websites_requested = Signal()
     missing_imprint_requested = Signal()
     crm_filter_changed = Signal(object)
@@ -116,6 +120,7 @@ class MainWindow(QMainWindow):
     import_report_save_requested = Signal(object)
     import_cleaned_file_requested = Signal(str)
     import_customers_requested = Signal()
+    import_report_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -128,10 +133,13 @@ class MainWindow(QMainWindow):
         self.progress_dialog = None
         self.research_filter_dialog = None
         self.customer_export_dialog = None
+        self.enrichment_options_dialog = None
+        self._has_customer_data = False
+        self._update_customer_action_states()
 
     def _build_ui(self):
         self.main_menu = MainMenu(self)
-        self.main_toolbar = MainToolbar(self)
+        self.main_toolbar = MainToolbar(self.main_menu.actions, self)
         self.navigation_bar = self._create_navigation_bar()
 
         self.dashboard = Dashboard(self)
@@ -147,7 +155,8 @@ class MainWindow(QMainWindow):
             "Kunden, Orte oder Kontaktdaten durchsuchen …"
         )
         self.stage_filter = QComboBox(self)
-        self.stage_filter.addItems(["Alle Kundenstatus", "Interessent", "Kontakt aufgenommen", "Angebot", "Kunde", "Inaktiv", "Gesperrt"])
+        for label, key in STATUS_FILTER_LABELS:
+            self.stage_filter.addItem(label, key)
         self.priority_filter = QComboBox(self)
         self.priority_filter.addItems(["Alle Prioritäten", "Niedrig", "Normal", "Hoch"])
         self.tag_filter = QLineEdit(self)
@@ -258,6 +267,7 @@ class MainWindow(QMainWindow):
         self.dashboard.enrichment_missing_requested.connect(self.enrichment_missing_requested)
         self.dashboard.weak_websites_requested.connect(self.weak_websites_requested)
         self.dashboard.missing_imprint_requested.connect(self.missing_imprint_requested)
+        self.dashboard.status_filter_requested.connect(self.dashboard_status_filter_requested)
         self.reports_page.filter_changed.connect(self.report_filter_changed)
         self.reports_page.reload_requested.connect(self.report_reload_requested)
         self.reports_page.export_requested.connect(self.report_page_export_requested)
@@ -271,6 +281,10 @@ class MainWindow(QMainWindow):
         self.main_menu.exit_requested.connect(self.quit_requested)
         self.main_menu.duplicate_requested.connect(self.duplicates_requested)
         self.main_menu.phone_cleanup_requested.connect(self.phone_cleanup_requested)
+        self.main_menu.import_report_requested.connect(self.import_report_requested)
+        self.main_menu.enrichment_refresh_requested.connect(
+            lambda: self.enrichment_selected_requested.emit(True)
+        )
 
         self.main_menu.research_requested.connect(self.check_requested)
         self.main_menu.research_refresh_requested.connect(self.refresh_requested)
@@ -281,20 +295,15 @@ class MainWindow(QMainWindow):
         self.main_menu.enrichment_requested.connect(self.enrichment_options_requested)
         self.main_menu.enrichment_marked_requested.connect(self.enrichment_marked_requested)
         self.main_menu.enrichment_missing_requested.connect(self.enrichment_missing_requested)
+        self.main_menu.report_reload_requested.connect(self.report_reload_requested)
+        self.main_menu.report_export_requested.connect(self.report_page_export_requested)
+        self.main_menu.report_detail_requested.connect(self.reports_page._detail)
+        self.main_menu.report_company_requested.connect(self.reports_page._company)
         self.main_menu.log_directory_requested.connect(self.log_directory_requested)
         self.main_menu.user_data_directory_requested.connect(self.user_data_directory_requested)
         self.main_menu.system_information_requested.connect(self.system_information_requested)
         self.main_menu.about_requested.connect(self.about_requested)
         self.main_menu.update_check_requested.connect(self.update_check_requested)
-
-        self.main_toolbar.open_requested.connect(self._select_excel_file)
-        self.main_toolbar.search_requested.connect(self.check_requested)
-        self.main_toolbar.refresh_requested.connect(self.refresh_requested)
-        self.main_toolbar.bulk_requested.connect(self.bulk_check_requested)
-        self.main_toolbar.marked_refresh_requested.connect(self.marked_refresh_requested)
-        self.main_toolbar.inactive_refresh_requested.connect(self.inactive_refresh_requested)
-        self.main_toolbar.duplicate_requested.connect(self.duplicates_requested)
-        self.main_toolbar.export_requested.connect(self.export_requested)
 
         self.search_field.textChanged.connect(self.search_changed)
         self.stage_filter.currentTextChanged.connect(self._emit_crm_filter)
@@ -340,9 +349,7 @@ class MainWindow(QMainWindow):
         reports_action = QAction("Berichte", self); reports_action.setShortcut(QKeySequence("Ctrl+3")); reports_action.triggered.connect(self.reports_navigation_requested)
         view_menu.addAction(dashboard_action); view_menu.addAction(customers_action); view_menu.addAction(reports_action)
         search_action = QAction("Suche fokussieren", self); search_action.setShortcut(QKeySequence("Ctrl+F")); search_action.triggered.connect(self.search_field.setFocus)
-        open_action = QAction("Excel öffnen", self); open_action.setShortcut(QKeySequence("Ctrl+O")); open_action.triggered.connect(self._select_excel_file)
-        export_action = QAction("Export", self); export_action.setShortcut(QKeySequence("Ctrl+E")); export_action.triggered.connect(self.export_requested)
-        for action in (search_action, open_action, export_action): self.addAction(action)
+        self.addAction(search_action)
 
     @Slot()
     def show_dashboard_page(self):
@@ -363,6 +370,10 @@ class MainWindow(QMainWindow):
         self.dashboard_nav_button.setChecked(dashboard)
         self.customers_nav_button.setChecked(index == 1)
         self.reports_nav_button.setChecked(index == 2)
+        self.main_toolbar.set_context(index)
+        page_names = ("Dashboard", "Kunden", "Berichte")
+        self.main_statusbar.set_status(page_names[index])
+        (self.search_field if index == 1 else self.stack.currentWidget()).setFocus()
 
     @Slot(object)
     def set_dashboard_data(self, data):
@@ -370,7 +381,7 @@ class MainWindow(QMainWindow):
 
     def _emit_crm_filter(self):
         self.crm_filter_changed.emit({
-            "stage": self.stage_filter.currentText(),
+            "status": self.stage_filter.currentData(),
             "priority": self.priority_filter.currentText(),
             "tag": self.tag_filter.text().strip(),
         })
@@ -383,6 +394,35 @@ class MainWindow(QMainWindow):
             "hours": self.hours_filter.currentText(),
             "age_days": self.analysis_age_filter.value(),
         })
+
+    @Slot(str)
+    def reset_customer_filter_controls(self, status_key):
+        widgets = (
+            self.search_field,
+            self.stage_filter,
+            self.priority_filter,
+            self.tag_filter,
+            self.website_score_filter,
+            self.industry_filter,
+            self.social_filter,
+            self.hours_filter,
+            self.analysis_age_filter,
+        )
+        blockers = [QSignalBlocker(widget) for widget in widgets]
+        self.search_field.clear()
+        self.stage_filter.setCurrentIndex(max(0, self.stage_filter.findData(status_key)))
+        self.priority_filter.setCurrentIndex(0)
+        self.tag_filter.clear()
+        self.website_score_filter.setCurrentIndex(0)
+        self.industry_filter.clear()
+        self.social_filter.setCurrentIndex(0)
+        self.hours_filter.setCurrentIndex(0)
+        self.analysis_age_filter.setValue(0)
+        selection_blocker = QSignalBlocker(self.customer_table.selectionModel())
+        self.customer_table.clearSelection()
+        self.customer_table.setCurrentIndex(QModelIndex())
+        del selection_blocker
+        del blockers
 
     @Slot(object)
     def set_reports_data(self, data):
@@ -542,21 +582,33 @@ class MainWindow(QMainWindow):
     def _emit_selected_customer(self, current, _previous):
         if not current.isValid():
             self.customer_selected.emit(None)
+            self._update_customer_action_states()
             return
 
         record = self.table_model.get_row(current.row())
         self.customer_selected.emit(
             record.to_dict() if record is not None else None
         )
+        self._update_customer_action_states()
 
     @Slot(object)
     def set_customers(self, dataframe):
         selected_customer = self._current_customer()
+        scroll_value = self.customer_table.verticalScrollBar().value()
         selection_model = self.customer_table.selectionModel()
         blocker = QSignalBlocker(selection_model)
         self.table_model.set_dataframe(dataframe)
+        self._has_customer_data = self._has_customer_data or self.table_model.rowCount() > 0
 
         row = self._find_customer_row(selected_customer)
+        if row < 0 and selected_customer:
+            self.customer_table.clearSelection()
+            del blocker
+            self.customer_selected.emit(None)
+            self.selected_customers_changed.emit([])
+            self.customer_table.verticalScrollBar().setValue(scroll_value)
+            self._update_customer_action_states()
+            return
         if row < 0 and self.table_model.rowCount() > 0:
             row = 0
 
@@ -565,6 +617,7 @@ class MainWindow(QMainWindow):
             del blocker
             self.customer_selected.emit(None)
             self.selected_customers_changed.emit([])
+            self._update_customer_action_states()
             return
 
         index = self.table_model.index(row, 0)
@@ -575,10 +628,12 @@ class MainWindow(QMainWindow):
         del blocker
         self._emit_selected_customer(index, QModelIndex())
         self._emit_selected_customers()
+        self.customer_table.verticalScrollBar().setValue(scroll_value)
+        self._update_customer_action_states()
 
     @Slot(object, object)
-    def update_customer_rows(self, rows, columns):
-        self.table_model.notify_rows_changed(rows, columns)
+    def update_customer_rows(self, rows, values):
+        self.table_model.update_rows(rows, values)
 
     @Slot(object, object)
     def _emit_selected_customers(self, _selected=None, _deselected=None):
@@ -593,6 +648,20 @@ class MainWindow(QMainWindow):
                     )
                 )
         self.selected_customers_changed.emit(customer_keys)
+        self._update_customer_action_states()
+
+    def _update_customer_action_states(self):
+        actions = self.main_menu.actions
+        current = self._current_customer() if hasattr(self, "customer_table") else None
+        marked = bool(self.customer_table.selectionModel().selectedRows()) if hasattr(self, "customer_table") else False
+        loaded = bool(getattr(self, "_has_customer_data", False))
+        for key in ("export", "bulk", "inactive_refresh", "enrichment_all", "enrichment_missing", "duplicates", "phone_cleanup"):
+            actions[key].setEnabled(loaded)
+        for key in ("research", "research_refresh"):
+            actions[key].setEnabled(current is not None)
+        actions["marked_refresh"].setEnabled(marked)
+        actions["enrichment_marked"].setEnabled(marked)
+        actions["enrichment_refresh"].setEnabled(bool(current and str(current.get("WEBSITE", "")).strip()))
 
     def _current_customer(self):
         index = self.customer_table.currentIndex()
@@ -607,6 +676,18 @@ class MainWindow(QMainWindow):
         if not customer:
             return -1
 
+        stable_columns = ("id", "ID", "KUNDEN_ID", "CUSTOMER_ID")
+        selected_id = next((customer.get(column) for column in stable_columns if column in customer), None)
+        if selected_id is not None:
+            for row in range(self.table_model.rowCount()):
+                record = self.table_model.get_row(row)
+                if record is not None and any(
+                    column in record and str(record.get(column)) == str(selected_id)
+                    for column in stable_columns
+                ):
+                    return row
+        from models.address_utils import STREET_COLUMNS, first_value, normalize_street
+        selected_street = normalize_street(first_value(customer, STREET_COLUMNS))
         for row in range(self.table_model.rowCount()):
             record = self.table_model.get_row(row)
             if record is None:
@@ -617,7 +698,8 @@ class MainWindow(QMainWindow):
                 and str(record.get("CITY", ""))
                 == str(customer.get("CITY", ""))
             ):
-                return row
+                if not selected_street.usable or normalize_street(first_value(record, STREET_COLUMNS)) == selected_street:
+                    return row
 
         return -1
 
@@ -681,6 +763,16 @@ class MainWindow(QMainWindow):
             self.progress_dialog.update_progress(current, total, company, status)
 
     @Slot()
+    def set_enrichment_progress_mode(self):
+        if self.progress_dialog is not None:
+            self.progress_dialog.set_enrichment_mode()
+
+    @Slot(int)
+    def set_progress_error_count(self, count):
+        if self.progress_dialog is not None:
+            self.progress_dialog.set_error_count(count)
+
+    @Slot()
     def close_progress_dialog(self):
         if self.progress_dialog is None:
             return
@@ -689,23 +781,45 @@ class MainWindow(QMainWindow):
         self.progress_dialog.deleteLater()
         self.progress_dialog = None
 
-    @Slot()
-    def show_enrichment_options(self):
+    @Slot(int)
+    def show_enrichment_options(self, default_age_days):
         from widgets.enrichment_options_dialog import EnrichmentOptionsDialog
-        dialog = EnrichmentOptionsDialog(self)
-        dialog.accepted_options.connect(self.enrichment_options_selected)
-        dialog.exec()
+        self.enrichment_options_dialog = EnrichmentOptionsDialog(default_age_days, self)
+        self.enrichment_options_dialog.options_changed.connect(self.enrichment_options_changed)
+        self.enrichment_options_dialog.accepted_options.connect(self.enrichment_options_selected)
+        self.enrichment_options_dialog.emit_options()
+        self.enrichment_options_dialog.exec()
+        self.enrichment_options_dialog = None
 
-    @Slot(object, bool, str)
-    def show_enrichment_confirmation(self, customers, force_refresh, duration):
+    @Slot(int, int, int, int, int, str)
+    def update_enrichment_options_preview(self, total, websites, analyzed, selected, skipped, duration):
+        if self.enrichment_options_dialog is not None:
+            self.enrichment_options_dialog.update_preview(
+                total, websites, analyzed, selected, skipped, duration
+            )
+
+    @Slot(object, int, bool, str)
+    def show_enrichment_confirmation(self, customers, skipped, force_refresh, duration):
         answer = QMessageBox.question(
             self, "Websiteanalyse starten",
-            f"{len(customers)} Websites werden analysiert.\nGeschätzte Dauer: {duration}.\n\n"
+            f"{len(customers)} Websites werden analysiert.\n"
+            f"{skipped} vorhandene aktuelle Analysen werden übersprungen.\n"
+            f"Geschätzte Dauer: {duration}.\n\n"
             + ("Vorhandene Analysen werden ignoriert." if force_refresh else "Aktuelle Analysen können aus dem Cache verwendet werden."),
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if answer == QMessageBox.Yes:
             self.enrichment_confirmed.emit(customers, force_refresh)
+
+    @Slot(object)
+    def show_post_research_enrichment_offer(self, offer):
+        from widgets.post_research_enrichment_dialog import PostResearchEnrichmentDialog
+
+        dialog = PostResearchEnrichmentDialog(offer, self)
+        accepted = dialog.exec() == QDialog.Accepted
+        self.post_research_enrichment_decided.emit(
+            accepted, dialog.force_refresh.isChecked(), dialog.do_not_ask.isChecked()
+        )
 
     @Slot(object)
     def show_enrichment_detail(self, result):
@@ -735,6 +849,20 @@ class MainWindow(QMainWindow):
 
     @Slot(object, int, int, bool)
     def show_research_confirmation(self, options, selected, skipped, force_refresh):
+        if not force_refresh:
+            from widgets.street_matching_dialog import StreetMatchingDialog
+
+            confirmation_options = dict(options or {})
+            dialog = StreetMatchingDialog(
+                confirmation_options.get("use_street_matching", True),
+                self,
+            )
+            if dialog.exec() == QDialog.Accepted:
+                confirmation_options["use_street_matching"] = dialog.use_street_matching
+                confirmation_options["remember_street_matching"] = dialog.remember
+                self.research_filter_confirmed.emit(confirmation_options, False)
+            return
+
         mode = "erneut " if force_refresh else ""
         answer = QMessageBox.question(
             self,

@@ -56,13 +56,18 @@ class ApplicationController(QObject):
     report_changes_changed = Signal(object)
     main_window_visible = Signal()
     customer_rows_updated = Signal(object, object)
+    customer_filter_controls_reset_requested = Signal(str)
     about_dialog_requested = Signal(object)
     update_dialog_requested = Signal(object)
     import_report_dialog_requested = Signal(object, str)
-    enrichment_options_dialog_requested = Signal()
-    enrichment_confirmation_requested = Signal(object, bool, str)
+    enrichment_options_dialog_requested = Signal(int)
+    enrichment_options_preview_changed = Signal(int, int, int, int, int, str)
+    enrichment_confirmation_requested = Signal(object, int, bool, str)
+    enrichment_progress_mode_requested = Signal()
+    enrichment_error_count_changed = Signal(int)
     enrichment_detail_dialog_requested = Signal(object)
     cancel_enrichment_requested = Signal()
+    post_research_enrichment_offer_requested = Signal(object)
 
     def __init__(self, parent=None, startup_profiler=None, startup_status=None):
         super().__init__(parent)
@@ -103,11 +108,17 @@ class ApplicationController(QObject):
         self._active_search_text = ""
         self._cancel_requested = False
         self._pending_research_worklist = None
+        self._next_research_mode = "bulk"
+        self._active_research_mode = "bulk"
+        self._active_research_force_refresh = False
+        self._pending_post_research_summary = None
+        self._active_research_run = None
+        self._pending_post_research_offer = None
         self._last_research_report = self._load_last_report()
         self._mark_startup("Letzter Bericht geladen")
         self._report_filter = "all"
         self._editing_activity_id = None
-        self._crm_filter = {"stage": "Alle Kundenstatus", "priority": "Alle Prioritäten", "tag": ""}
+        self._crm_filter = {"status": "all", "priority": "Alle Prioritäten", "tag": ""}
         self._enrichment_filter = {"score": "Alle Website-Scores", "industry": "", "social": "Social Media: Alle", "hours": "Öffnungszeiten: Alle", "age_days": 0}
         self._show_followups_only = False
         self._pending_customer_export = None
@@ -126,6 +137,10 @@ class ApplicationController(QObject):
         self._enrichment_thread = None
         self._enrichment_worker = None
         self._enrichment_results = {}
+        self._dashboard_update_timer = QTimer(self)
+        self._dashboard_update_timer.setSingleShot(True)
+        self._dashboard_update_timer.setInterval(350)
+        self._dashboard_update_timer.timeout.connect(self._update_dashboard)
 
         self._connect_signals()
 
@@ -255,6 +270,7 @@ class ApplicationController(QObject):
         self.window.inactive_refresh_requested.connect(self.research_inactive_refresh)
         self.window.report_requested.connect(self.show_last_report)
         self.window.dashboard_navigation_requested.connect(self.show_dashboard)
+        self.window.dashboard_status_filter_requested.connect(self.show_dashboard_status)
         self.window.customers_navigation_requested.connect(self.show_customers)
         self.window.reports_navigation_requested.connect(self.show_reports)
         self.window.shutdown_requested.connect(self.shutdown_application)
@@ -289,7 +305,9 @@ class ApplicationController(QObject):
         self.window.import_report_save_requested.connect(self.save_import_report)
         self.window.import_cleaned_file_requested.connect(self.open_cleaned_import_file)
         self.window.import_customers_requested.connect(self.show_customers)
+        self.window.import_report_requested.connect(self.show_last_import_report)
         self.window.enrichment_options_requested.connect(self.open_enrichment_options)
+        self.window.enrichment_options_changed.connect(self.preview_enrichment)
         self.window.enrichment_options_selected.connect(self.prepare_enrichment)
         self.window.enrichment_confirmed.connect(self.start_enrichment)
         self.window.enrichment_selected_requested.connect(self.enrich_selected_customer)
@@ -298,6 +316,7 @@ class ApplicationController(QObject):
         self.window.enrichment_details_requested.connect(self.show_enrichment_details)
         self.window.enrichment_url_requested.connect(self.open_enrichment_url)
         self.window.enrichment_filter_changed.connect(self.set_enrichment_filter)
+        self.window.post_research_enrichment_decided.connect(self._handle_post_research_enrichment_decision)
         self.window.weak_websites_requested.connect(self.show_weak_websites)
         self.window.missing_imprint_requested.connect(self.show_missing_imprint)
         self.window.research_cancel_requested.connect(self.cancel_enrichment)
@@ -329,6 +348,7 @@ class ApplicationController(QObject):
         self.report_dialog_requested.connect(self.window.show_research_report)
         self.dashboard_data_changed.connect(self.window.set_dashboard_data)
         self.page_changed.connect(self.window.set_page)
+        self.customer_filter_controls_reset_requested.connect(self.window.reset_customer_filter_controls)
         self.reports_data_changed.connect(self.window.set_reports_data)
         self.report_changes_changed.connect(self.window.set_report_changes)
         self.crm_data_changed.connect(self.window.set_crm_data)
@@ -341,8 +361,12 @@ class ApplicationController(QObject):
         self.update_dialog_requested.connect(self.window.show_update_dialog)
         self.import_report_dialog_requested.connect(self.window.show_import_report)
         self.enrichment_options_dialog_requested.connect(self.window.show_enrichment_options)
+        self.enrichment_options_preview_changed.connect(self.window.update_enrichment_options_preview)
         self.enrichment_confirmation_requested.connect(self.window.show_enrichment_confirmation)
+        self.enrichment_progress_mode_requested.connect(self.window.set_enrichment_progress_mode)
+        self.enrichment_error_count_changed.connect(self.window.set_progress_error_count)
         self.enrichment_detail_dialog_requested.connect(self.window.show_enrichment_detail)
+        self.post_research_enrichment_offer_requested.connect(self.window.show_post_research_enrichment_offer)
         self.excel_file_dialog_requested.connect(self.window._select_excel_file)
 
     def start(self):
@@ -597,6 +621,44 @@ class ApplicationController(QObject):
         logger.info("Navigation zur Kundenseite")
         self.page_changed.emit(1)
 
+    @Slot(str)
+    def show_dashboard_status(self, status_key):
+        from models.customer_status import STATUS_FILTERS, STATUS_FILTER_LABELS
+
+        if status_key not in STATUS_FILTERS:
+            logger.warning("Unbekannter Dashboard-Statusfilter ignoriert: {}", status_key)
+            return
+        self._active_search_text = ""
+        self._crm_filter = {"status": status_key, "priority": "Alle Prioritäten", "tag": ""}
+        self._enrichment_filter = {
+            "score": "Alle Website-Scores",
+            "industry": "",
+            "social": "Social Media: Alle",
+            "hours": "Öffnungszeiten: Alle",
+            "age_days": 0,
+        }
+        self._show_followups_only = False
+        self._selected_customer = None
+        self._selected_customers = set()
+        self.customer_details_changed.emit(None)
+        self.customer_filter_controls_reset_requested.emit(status_key)
+        self.show_customers()
+
+        filtered = self._filtered_customers()
+        total = len(self._current_dataframe) if self._current_dataframe is not None else 0
+        self.customers_changed.emit(filtered)
+        self.customer_count_changed.emit(len(filtered))
+        self.visible_count_changed.emit(len(filtered), total)
+
+        label = {key: text for text, key in STATUS_FILTER_LABELS}.get(status_key, status_key)
+        if filtered is None or filtered.empty:
+            message = "Keine Kunden vorhanden." if status_key == "all" else f"Keine Kunden mit Status {label} vorhanden."
+        elif status_key == "all":
+            message = f"{len(filtered)} Kunden"
+        else:
+            message = f"{len(filtered)} Kunden mit Status {label}"
+        self.status_changed.emit(message)
+
     @Slot()
     def show_reports(self):
         logger.info("Berichtsseite geöffnet")
@@ -679,7 +741,8 @@ class ApplicationController(QObject):
                     if column not in df.columns:
                         return pd.Series(True, index=df.index)
                     return df[column].isna() | df[column].astype(str).str.strip().eq("")
-                status = df.get("STATUS", pd.Series("", index=df.index)).fillna("").astype(str).str.strip().str.lower()
+                from models.customer_status import normalize_customer_status
+                status = df.get("STATUS", pd.Series("", index=df.index)).map(normalize_customer_status)
                 data = DashboardData(
                     total=len(df), complete=int(status.eq("vollständig").sum()),
                     active=int(status.eq("aktiv").sum()), inactive=int(status.eq("nicht aktiv").sum()),
@@ -707,9 +770,11 @@ class ApplicationController(QObject):
             data.very_good_websites = int(summary[2] or 0); data.weak_websites = int(summary[3] or 0)
             data.websites_without_imprint = int(summary[4] or 0); data.websites_without_privacy = int(summary[5] or 0)
             data.websites_with_opening_hours = int(summary[6] or 0); data.websites_with_social_media = int(summary[7] or 0)
+            data.website_analysis_errors = self.crm_service.database.get_enrichment_error_count()
             if df is not None and "WEBSITE" in df.columns:
                 websites = df["WEBSITE"].fillna("").astype(str).str.strip().ne("")
                 analyzed = df.get("ANALYZED_AT", df.index.to_series().map(lambda _: "")).fillna("").astype(str).str.strip().ne("")
+                data.websites_analyzed = int((websites & analyzed).sum())
                 data.websites_not_analyzed = int((websites & ~analyzed).sum())
                 if "INDUSTRY" in df.columns:
                     data.industry_distribution = {str(key): int(value) for key, value in df.loc[analyzed, "INDUSTRY"].replace("", "Unklar").value_counts().head(8).items()}
@@ -717,6 +782,15 @@ class ApplicationController(QObject):
             logger.info("Dashboard-Daten aktualisiert: {} Kunden", data.total)
         except Exception as error:
             logger.exception("Fehler beim Erzeugen der Dashboard-Daten: {}", error)
+
+    def _schedule_dashboard_update(self):
+        if not self._dashboard_update_timer.isActive():
+            self._dashboard_update_timer.start()
+
+    def _flush_dashboard_update(self):
+        if self._dashboard_update_timer.isActive():
+            self._dashboard_update_timer.stop()
+        self._update_dashboard()
 
     @Slot()
     def show_settings(self):
@@ -924,6 +998,16 @@ class ApplicationController(QObject):
         report = result.report
         self.import_report_dialog_requested.emit(report, str(self._last_cleaned_import_path or ""))
 
+    @Slot()
+    def show_last_import_report(self):
+        if self._last_import_report is None:
+            self.information_requested.emit("Importprüfung", "Es liegt noch kein Importbericht vor.")
+            return
+        self.import_report_dialog_requested.emit(
+            self._last_import_report,
+            str(self._last_cleaned_import_path or ""),
+        )
+
     @Slot(object)
     def save_import_report(self, report):
         from dataclasses import asdict
@@ -962,7 +1046,13 @@ class ApplicationController(QObject):
 
     @Slot(object)
     def set_crm_filter(self, values):
-        self._crm_filter = dict(values or {})
+        from models.customer_status import STATUS_FILTER_LABELS
+
+        values = dict(values or {})
+        status = values.get("status", values.get("stage", "all"))
+        label_keys = {label: key for label, key in STATUS_FILTER_LABELS}
+        values["status"] = label_keys.get(status, status if status in label_keys.values() else "all")
+        self._crm_filter = values
         filtered = self._filtered_customers()
         total = len(self._current_dataframe) if self._current_dataframe is not None else 0
         self.customers_changed.emit(filtered)
@@ -1001,14 +1091,16 @@ class ApplicationController(QObject):
         if dataframe is None or dataframe.empty:
             return dataframe
         import pandas as pd
-        stage = self._crm_filter.get("stage", "Alle Kundenstatus")
+        status_filter = self._crm_filter.get("status", "all")
         priority = self._crm_filter.get("priority", "Alle Prioritäten")
         tag = self._crm_filter.get("tag", "").casefold()
         mask = pd.Series(True, index=dataframe.index)
         if getattr(self, "_show_followups_only", False) and "NÄCHSTE_WIEDERVORLAGE" in dataframe.columns:
             mask &= dataframe["NÄCHSTE_WIEDERVORLAGE"].fillna("").astype(str).str.strip().ne("")
-        if stage != "Alle Kundenstatus" and "KUNDENSTATUS" in dataframe.columns:
-            mask &= dataframe["KUNDENSTATUS"].fillna("").astype(str).eq(stage)
+        if status_filter != "all":
+            from models.customer_status import status_mask
+            statuses = dataframe.get("STATUS", pd.Series("", index=dataframe.index))
+            mask &= status_mask(statuses, status_filter)
         if priority != "Alle Prioritäten" and "PRIORITÄT" in dataframe.columns:
             mask &= dataframe["PRIORITÄT"].fillna("").astype(str).eq(priority)
         if tag and "TAGS" in dataframe.columns:
@@ -1094,6 +1186,7 @@ class ApplicationController(QObject):
     @staticmethod
     def _enrichment_values(result):
         social = result.social_media
+        imprint = result.imprint_data
         return {
             "WEBSITE_SCORE": result.website_score,
             "WEBSITE_SCORE_CATEGORY": result.website_score_category,
@@ -1115,6 +1208,19 @@ class ApplicationController(QObject):
             "WEBSITE_TITLE": result.website_title, "META_DESCRIPTION": result.meta_description,
             "ANALYZED_AT": result.analyzed_at, "ANALYSIS_VERSION": result.analysis_version,
             "ENRICHMENT_STATUS": result.enrichment_status, "ENRICHMENT_ERROR": result.enrichment_error,
+            "IMPRINT_OWNER_NAMES": "; ".join(imprint.owner_names),
+            "IMPRINT_MANAGING_DIRECTOR_NAMES": "; ".join(imprint.managing_director_names),
+            "IMPRINT_REPRESENTATIVE_NAMES": "; ".join(imprint.representative_names),
+            "IMPRINT_LEGAL_FORM": imprint.legal_form, "IMPRINT_COMPANY_NAME": imprint.imprint_company_name,
+            "IMPRINT_STREET": imprint.imprint_street, "IMPRINT_HOUSE_NUMBER": imprint.imprint_house_number,
+            "IMPRINT_POSTAL_CODE": imprint.imprint_postal_code,
+            "IMPRINT_CITY": imprint.imprint_city, "IMPRINT_COUNTRY": imprint.imprint_country,
+            "IMPRINT_PHONE": imprint.imprint_phone, "IMPRINT_EMAIL": imprint.imprint_email,
+            "IMPRINT_VAT_ID": imprint.vat_id, "IMPRINT_REGISTER_TYPE": imprint.commercial_register_type,
+            "IMPRINT_REGISTER_NUMBER": imprint.commercial_register_number,
+            "IMPRINT_REGISTER_COURT": imprint.register_court,
+            "IMPRINT_CONFIDENCE": imprint.imprint_extraction_confidence,
+            "IMPRINT_ANALYZED_AT": imprint.imprint_analyzed_at,
         }
 
     @staticmethod
@@ -1126,6 +1232,11 @@ class ApplicationController(QObject):
             "SOCIAL_YOUTUBE", "SOCIAL_TIKTOK", "SOCIAL_X", "SOCIAL_PINTEREST", "SOCIAL_MEDIA", "INDUSTRY",
             "INDUSTRY_CONFIDENCE", "SHORT_DESCRIPTION", "WEBSITE_TITLE", "META_DESCRIPTION", "ANALYZED_AT",
             "ANALYSIS_VERSION", "ENRICHMENT_STATUS", "ENRICHMENT_ERROR",
+            "IMPRINT_OWNER_NAMES", "IMPRINT_MANAGING_DIRECTOR_NAMES", "IMPRINT_REPRESENTATIVE_NAMES",
+            "IMPRINT_LEGAL_FORM", "IMPRINT_COMPANY_NAME", "IMPRINT_STREET", "IMPRINT_HOUSE_NUMBER", "IMPRINT_POSTAL_CODE",
+            "IMPRINT_CITY", "IMPRINT_COUNTRY", "IMPRINT_PHONE", "IMPRINT_EMAIL", "IMPRINT_VAT_ID",
+            "IMPRINT_REGISTER_TYPE", "IMPRINT_REGISTER_NUMBER", "IMPRINT_REGISTER_COURT",
+            "IMPRINT_CONFIDENCE", "IMPRINT_ANALYZED_AT",
         }
 
     def _merge_enrichment_dataframe(self, dataframe):
@@ -1141,8 +1252,6 @@ class ApplicationController(QObject):
             if not stored or WebsiteFinder.clean_url(row.get("WEBSITE", "")) != WebsiteFinder.clean_url(stored[0]):
                 continue
             result = EnrichmentResult.from_dict(stored[1])
-            if result.enrichment_status != "Erfolgreich":
-                continue
             self._enrichment_results[key] = result
             for column, value in self._enrichment_values(result).items():
                 dataframe.at[index, column] = value
@@ -1153,36 +1262,91 @@ class ApplicationController(QObject):
         if self._current_dataframe is None or self._current_dataframe.empty:
             self.information_requested.emit("Websiteanalyse", "Bitte zuerst Kundendaten laden.")
             return
-        self.enrichment_options_dialog_requested.emit()
+        self.enrichment_options_dialog_requested.emit(AppConfig.ENRICHMENT_MAX_AGE_DAYS)
+
+    def _enrichment_selection(self, options):
+        import pandas as pd
+        from services.enrichment_service import EnrichmentService
+
+        options = dict(options or {})
+        all_customers = self._current_dataframe
+        empty = all_customers.iloc[0:0].copy()
+        scope = options.get("scope", "visible")
+        source = self._filtered_customers() if scope == "visible" else all_customers
+        if source is None:
+            source = empty
+        if scope == "selected":
+            selected = set(self._selected_customers)
+            source = all_customers.loc[all_customers.apply(
+                lambda row: (str(row.get("KUNDENNAME", "")), str(row.get("CITY", ""))) in selected,
+                axis=1,
+            )]
+
+        website_values = source.get("WEBSITE")
+        with_website = source.iloc[0:0] if website_values is None else source.loc[
+            website_values.fillna("").astype(str).str.strip().ne("")
+        ]
+        analyzed_values = with_website.get("ANALYZED_AT", pd.Series("", index=with_website.index))
+        analyzed_mask = analyzed_values.fillna("").astype(str).str.strip().ne("")
+
+        candidates = with_website
+        if scope == "missing":
+            candidates = with_website.loc[~analyzed_mask]
+        elif scope == "older":
+            age_days = int(options.get("age_days", AppConfig.ENRICHMENT_MAX_AGE_DAYS))
+            current = analyzed_values.apply(
+                lambda value: EnrichmentService.is_analysis_current(value, age_days)
+            )
+            candidates = with_website.loc[analyzed_mask & ~current]
+        elif scope == "weak":
+            scores = with_website.get("WEBSITE_SCORE_CATEGORY", pd.Series("", index=with_website.index))
+            candidates = with_website.loc[scores.fillna("").astype(str).str.casefold().eq("schwach")]
+        elif scope == "error":
+            statuses = with_website.get("ENRICHMENT_STATUS", pd.Series("", index=with_website.index))
+            candidates = with_website.loc[statuses.fillna("").astype(str).str.casefold().eq("fehler")]
+
+        worklist = candidates
+        if not options.get("force_refresh") and scope != "older":
+            candidate_dates = candidates.get("ANALYZED_AT", pd.Series("", index=candidates.index))
+            current = candidate_dates.apply(EnrichmentService.is_analysis_current)
+            worklist = candidates.loc[~current]
+
+        worklist = worklist.drop_duplicates(
+            subset=[column for column in ("id", "ID", "KUNDEN_ID", "CUSTOMER_ID", "KUNDENNAME", "CITY") if column in worklist.columns]
+            or None
+        ).copy()
+        return {
+            "total": len(all_customers),
+            "websites": len(with_website),
+            "analyzed": int(analyzed_mask.sum()),
+            "selected": len(worklist),
+            "skipped": max(0, len(candidates) - len(worklist)),
+            "worklist": worklist,
+        }
+
+    @Slot(object)
+    def preview_enrichment(self, options):
+        selection = self._enrichment_selection(options)
+        self.enrichment_options_preview_changed.emit(
+            selection["total"], selection["websites"], selection["analyzed"],
+            selection["selected"], selection["skipped"],
+            self._format_duration(selection["selected"]),
+        )
 
     @Slot(object)
     def prepare_enrichment(self, options):
         options = dict(options or {})
-        source = self._filtered_customers()
-        scope = options.get("scope", "visible")
-        if source is None:
-            return
-        if scope == "selected":
-            selected = set(self._selected_customers)
-            source = source.loc[source.apply(lambda row: (str(row.get("KUNDENNAME", "")), str(row.get("CITY", ""))) in selected, axis=1)]
-        elif scope == "missing":
-            source = source.loc[source.get("ANALYZED_AT", source.index.to_series().map(lambda _: "")).fillna("").astype(str).str.strip().eq("")]
-        elif scope == "older":
-            import pandas as pd
-            cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=int(options.get("age_days", 30)))
-            dates = pd.to_datetime(source.get("ANALYZED_AT", pd.Series("", index=source.index)), errors="coerce", utc=True)
-            source = source.loc[dates.isna() | dates.lt(cutoff)]
-        websites = source.get("WEBSITE")
-        if websites is None:
-            source = source.iloc[0:0]
-        else:
-            source = source.loc[websites.fillna("").astype(str).str.strip().ne("")]
-        customers = source.to_dict("records")
+        selection = self._enrichment_selection(options)
+        customers = selection["worklist"].to_dict("records")
         if not customers:
-            self.information_requested.emit("Websiteanalyse", "Für diese Auswahl sind keine Kunden mit Website vorhanden.")
+            self.information_requested.emit(
+                "Websiteanalyse", "Für die gewählte Auswahl sind keine Websites zu analysieren."
+            )
             return
         duration = self._format_duration(len(customers))
-        self.enrichment_confirmation_requested.emit(customers, bool(options.get("force_refresh", False)), duration)
+        self.enrichment_confirmation_requested.emit(
+            customers, selection["skipped"], bool(options.get("force_refresh", False)), duration
+        )
 
     @Slot(bool)
     def enrich_selected_customer(self, force_refresh=False):
@@ -1214,14 +1378,17 @@ class ApplicationController(QObject):
         self._enrichment_thread.started.connect(self._enrichment_worker.run)
         self._enrichment_worker.progress.connect(self._on_enrichment_progress)
         self._enrichment_worker.result_ready.connect(self._apply_enrichment_result)
-        self._enrichment_worker.item_error.connect(lambda company, message: logger.warning("Analysefehler {}: {}", company, message))
+        self._enrichment_worker.item_error.connect(self._on_enrichment_item_error)
         self._enrichment_worker.finished.connect(self._on_enrichment_finished)
         self._enrichment_worker.error.connect(self._on_enrichment_error)
         self._enrichment_worker.finished.connect(self._enrichment_thread.quit)
         self._enrichment_worker.error.connect(self._enrichment_thread.quit)
         self._enrichment_thread.finished.connect(self._cleanup_enrichment_worker)
         self.cancel_enrichment_requested.connect(self._enrichment_worker.stop, Qt.ConnectionType.DirectConnection)
+        self._enrichment_error_count = 0
         self.progress_dialog_requested.emit(len(customers))
+        self.enrichment_progress_mode_requested.emit()
+        self.enrichment_error_count_changed.emit(0)
         self.status_changed.emit("Websiteanalyse gestartet.")
         self._enrichment_thread.start()
 
@@ -1230,6 +1397,12 @@ class ApplicationController(QObject):
         self.research_progress_changed.emit(current, total, company, status)
         self.status_changed.emit(f"Websiteanalyse {current}/{total}: {company} ({status})")
 
+    @Slot(str, str)
+    def _on_enrichment_item_error(self, company, message):
+        self._enrichment_error_count = getattr(self, "_enrichment_error_count", 0) + 1
+        self.enrichment_error_count_changed.emit(self._enrichment_error_count)
+        logger.warning("Analysefehler {}: {}", company, message)
+
     @Slot(object)
     def _apply_enrichment_result(self, result):
         if self._current_dataframe is None:
@@ -1237,24 +1410,78 @@ class ApplicationController(QObject):
         from services.crm_service import company_key
         key = result.company_key or company_key(result.company, result.city)
         self._enrichment_results[key] = result
-        matches = self._current_dataframe.apply(
-            lambda row: company_key(row.get("KUNDENNAME", ""), row.get("CITY", "")) == key, axis=1)
+        customer_id = getattr(result, "customer_id", None)
+        matches = None
+        if customer_id is not None:
+            for column in ("id", "ID", "KUNDEN_ID", "CUSTOMER_ID"):
+                if column in self._current_dataframe.columns:
+                    by_id = self._current_dataframe[column].astype(str).eq(str(customer_id))
+                    if by_id.any():
+                        matches = by_id
+                        break
+        if matches is None:
+            matches = self._current_dataframe.apply(
+                lambda row: company_key(row.get("KUNDENNAME", ""), row.get("CITY", "")) == key,
+                axis=1,
+            )
         if not matches.any():
             return
         values = self._enrichment_values(result)
+        added_columns = any(column not in self._current_dataframe.columns for column in values)
         for column, value in values.items():
             self._current_dataframe.loc[matches, column] = value
-        self.customer_service.set_dataframe(self._current_dataframe)
-        self._current_dataframe = self.customer_service.get_dataframe()
-        self.customers_changed.emit(self._filtered_customers())
-        if self._selected_customer and company_key(self._selected_customer.get("KUNDENNAME", ""), self._selected_customer.get("CITY", "")) == key:
+
+        service_frame = self.customer_service.get_dataframe()
+        if service_frame is not self._current_dataframe:
+            self.customer_service.set_dataframe(self._current_dataframe)
+            self._current_dataframe = self.customer_service.get_dataframe()
+            added_columns = True
+            if customer_id is not None:
+                id_column = next((column for column in ("id", "ID", "KUNDEN_ID", "CUSTOMER_ID") if column in self._current_dataframe.columns), None)
+                matches = self._current_dataframe[id_column].astype(str).eq(str(customer_id)) if id_column else matches
+
+        filters_active = bool(
+            self._active_search_text
+            or self._show_followups_only
+            or self._crm_filter.get("status", "all") != "all"
+            or self._crm_filter.get("priority", "Alle Prioritäten") != "Alle Prioritäten"
+            or self._crm_filter.get("tag", "")
+            or self._enrichment_filter.get("score", "Alle Website-Scores") != "Alle Website-Scores"
+            or self._enrichment_filter.get("industry", "")
+            or self._enrichment_filter.get("social", "Social Media: Alle") != "Social Media: Alle"
+            or self._enrichment_filter.get("hours", "Öffnungszeiten: Alle") != "Öffnungszeiten: Alle"
+            or self._enrichment_filter.get("age_days", 0)
+        )
+        if filters_active or added_columns:
+            visible = self._filtered_customers()
+            self.customers_changed.emit(visible)
+        else:
+            visible = self._current_dataframe
+            rows = [position for position, matched in enumerate(matches.tolist()) if matched]
+            self.customer_rows_updated.emit(rows, values)
+        self.visible_count_changed.emit(len(visible), len(self._current_dataframe))
+
+        selected_matches = False
+        if self._selected_customer:
+            selected_id = next((self._selected_customer.get(column) for column in ("id", "ID", "KUNDEN_ID", "CUSTOMER_ID") if column in self._selected_customer), None)
+            selected_matches = (
+                str(selected_id) == str(customer_id)
+                if selected_id is not None and customer_id is not None
+                else company_key(self._selected_customer.get("KUNDENNAME", ""), self._selected_customer.get("CITY", "")) == key
+            )
+        if selected_matches:
             self._selected_customer = self._current_dataframe.loc[matches].iloc[0].to_dict()
             self.customer_details_changed.emit(self._selected_customer)
-        self._update_dashboard()
+        self._schedule_dashboard_update()
 
     @Slot(list, bool)
     def _on_enrichment_finished(self, results, cancelled):
         self.progress_dialog_close_requested.emit()
+        if self._current_dataframe is not None:
+            visible = self._filtered_customers()
+            self.customers_changed.emit(visible)
+            self.visible_count_changed.emit(len(visible), len(self._current_dataframe))
+        self._flush_dashboard_update()
         errors = sum(result.enrichment_status == "Fehler" for result in results)
         message = f"Websiteanalyse {'abgebrochen' if cancelled else 'abgeschlossen'}: {len(results)} verarbeitet, {errors} Fehler."
         self.status_changed.emit(message)
@@ -1263,6 +1490,7 @@ class ApplicationController(QObject):
     @Slot(str)
     def _on_enrichment_error(self, message):
         self.progress_dialog_close_requested.emit()
+        self._flush_dashboard_update()
         self.error_requested.emit("Websiteanalyse", "Die Websiteanalyse konnte nicht abgeschlossen werden.")
         logger.error("Websiteanalyse-Workerfehler: {}", message)
 
@@ -1516,6 +1744,9 @@ class ApplicationController(QObject):
             )
             return
 
+        mode = "single_refresh" if force_refresh else "single"
+        self._active_research_run = self._new_research_run_state(mode, force_refresh, 1)
+
         before = dict(self._selected_customer)
         try:
             from inspect import Parameter, signature
@@ -1528,9 +1759,12 @@ class ApplicationController(QObject):
                     zipcode=self._selected_customer.get("ZIPCODE", self._selected_customer.get("ZIP", self._selected_customer.get("POSTALCODE", self._selected_customer.get("POSTCODE", self._selected_customer.get("PLZ", self._selected_customer.get("POSTLEITZAHL", "")))))),
                     country=self._selected_customer.get("LAND", self._selected_customer.get("COUNTRY", "")),
                     customer_id=next((self._selected_customer.get(name) for name in ("id", "ID", "KUNDEN_ID", "CUSTOMER_ID") if name in self._selected_customer), None),
+                    use_street_matching=True,
                 )
             result = research(company, city, **kwargs)
         except Exception as error:
+            self._active_research_run.finished_received = True
+            self._active_research_run.finalized = True
             report = ResearchReport.start(1)
             report.add_error(ResearchError(company, city, str(error)))
             report.finish(False)
@@ -1538,7 +1772,7 @@ class ApplicationController(QObject):
             self.error_requested.emit("Recherche", str(error))
             return
 
-        self._apply_research_result(result)
+        self._on_research_result_ready(result)
         report = ResearchReport.start(1)
         report.add_change(build_change(before, result))
         report.finish(False)
@@ -1546,6 +1780,13 @@ class ApplicationController(QObject):
         if getattr(result, "source", "") != "SQLite":
             self.license_service.record_researches(1)
         self.status_changed.emit(report.summary_text())
+        self._active_research_run.finished_received = True
+        self._active_research_run.error_count = report.errors
+        self._active_research_run.pending_result_count = 0
+        if self.window.isVisible():
+            QTimer.singleShot(0, self._finalize_research_run)
+        else:
+            self._active_research_run.finalized = True
 
     @Slot()
     def open_research_filter(self):
@@ -1602,9 +1843,14 @@ class ApplicationController(QObject):
             len(working_list),
             len(source) - len(working_list),
         )
+        confirmation_options = dict(options or {})
+        self._next_research_mode = "bulk"
+        confirmation_options["use_street_matching"] = bool(
+            self.settings["research"].get("use_street_matching", True)
+        )
         self._pending_research_worklist = working_list
         self.research_confirmation_requested.emit(
-            options,
+            confirmation_options,
             len(working_list),
             len(source) - len(working_list),
             False,
@@ -1625,7 +1871,22 @@ class ApplicationController(QObject):
         if self._license_required(len(working_list)):
             return
 
-        self._start_research_worker(working_list, force_refresh=force_refresh)
+        confirmation_options = dict(options or {})
+        use_street_matching = True if force_refresh else bool(
+            confirmation_options.get("use_street_matching", True)
+        )
+        if not force_refresh and confirmation_options.get("remember_street_matching"):
+            settings = Settings.normalize(self.settings)
+            settings["research"]["use_street_matching"] = use_street_matching
+            try:
+                self.settings = self.settings_store.save(settings)
+            except OSError as error:
+                logger.warning("Straßenabgleich-Auswahl konnte nicht gespeichert werden: {}", error)
+        self._start_research_worker(
+            working_list,
+            force_refresh=force_refresh,
+            use_street_matching=use_street_matching,
+        )
 
     @Slot()
     def research_marked_refresh(self):
@@ -1643,6 +1904,7 @@ class ApplicationController(QObject):
         ]
         worklist = self._deduplicate(worklist)
         logger.info("Markierte Arbeitsliste erstellt: {} Firmen", len(worklist))
+        self._next_research_mode = "marked_refresh"
         self._request_refresh_confirmation(worklist)
 
     @Slot()
@@ -1655,12 +1917,14 @@ class ApplicationController(QObject):
             self.information_requested.emit("Recherche", "Bitte zuerst Daten laden.")
             return
         if "STATUS" in self._current_dataframe.columns:
-            status = self._current_dataframe["STATUS"].astype(str).str.lower()
+            from models.customer_status import normalize_customer_status
+            status = self._current_dataframe["STATUS"].map(normalize_customer_status)
             inactive = status.isin({"nicht aktiv", "nicht gefunden"})
         else:
             inactive = self._current_dataframe.index.to_series().eq(-1)
         worklist = self._deduplicate(self._current_dataframe.loc[inactive])
         logger.info("Nicht aktive Arbeitsliste erstellt: {} Firmen", len(worklist))
+        self._next_research_mode = "inactive_refresh"
         self._request_refresh_confirmation(worklist)
 
     def _request_refresh_confirmation(self, worklist):
@@ -1722,10 +1986,8 @@ class ApplicationController(QObject):
             criteria.append(self._missing_value_mask(dataframe, "EMAIL"))
         if options.get("not_found"):
             if "STATUS" in dataframe.columns:
-                criteria.append(
-                    dataframe["STATUS"].astype(str).str.strip().str.lower()
-                    == "nicht gefunden"
-                )
+                from models.customer_status import status_mask
+                criteria.append(status_mask(dataframe["STATUS"], "not_found"))
             else:
                 criteria.append(dataframe.index.to_series().eq(-1))
         if options.get("older_than"):
@@ -1788,18 +2050,158 @@ class ApplicationController(QObject):
         hours, minutes = divmod(minutes, 60)
         return f"ca. {hours} Std. {minutes} Min."
 
-    def _start_research_worker(self, working_list, force_refresh=False):
+    @staticmethod
+    def _research_result_key(result):
+        customer_id = getattr(result, "customer_id", None)
+        if customer_id is not None:
+            return ("id", str(customer_id))
+        from services.crm_service import company_key
+        return ("company", company_key(getattr(result, "company", ""), getattr(result, "city", "")))
+
+    def _research_run_summary(self, mode, results, aborted, force_refresh, error_count=0):
+        from models.research_run_summary import ResearchRunSummary
+        from services.website_finder import WebsiteFinder
+
+        results = list(results or [])
+        processed = [self._research_result_key(result) for result in results]
+        successful = [
+            self._research_result_key(result) for result in results
+            if bool(getattr(result, "success", True)) and not str(getattr(result, "error_message", "")).strip()
+        ]
+        websites = [
+            self._research_result_key(result) for result in results
+            if self._research_result_key(result) in successful
+            and self._valid_enrichment_website(getattr(result, "website", ""))
+        ]
+        return ResearchRunSummary(
+            research_mode=mode, processed_customer_keys=processed,
+            successful_customer_keys=successful, website_customer_keys=websites,
+            results=results, error_count=int(error_count or 0), aborted=bool(aborted),
+            force_refresh=bool(force_refresh),
+        )
+
+    @staticmethod
+    def _valid_enrichment_website(value):
+        from urllib.parse import urlparse
+        from services.website_finder import WebsiteFinder
+
+        raw = str(value or "").strip()
+        path = urlparse(raw).path.casefold()
+        if any(path.endswith(extension) for extension in WebsiteFinder.DOCUMENT_EXTENSIONS):
+            return ""
+        return WebsiteFinder.clean_url(raw)
+
+    def _post_research_enrichment_selection(self, summary, force_refresh=False):
+        from services.enrichment_service import EnrichmentService
+        from services.website_finder import WebsiteFinder
+
+        if self._current_dataframe is None or self._current_dataframe.empty:
+            return [], 0, 0
+        successful = set(summary.successful_customer_keys)
+        rows = []
+        websites = 0
+        skipped_current = 0
+        for result in summary.results:
+            key = self._research_result_key(result)
+            website = self._valid_enrichment_website(getattr(result, "website", ""))
+            if key not in successful or not website:
+                continue
+            matches = None
+            customer_id = getattr(result, "customer_id", None)
+            if customer_id is not None:
+                for column in ("id", "ID", "KUNDEN_ID", "CUSTOMER_ID"):
+                    if column in self._current_dataframe.columns:
+                        candidate = self._current_dataframe[column].astype(str).eq(str(customer_id))
+                        if candidate.any():
+                            matches = candidate
+                            break
+            if matches is None:
+                from services.crm_service import company_key
+                target = company_key(getattr(result, "company", ""), getattr(result, "city", ""))
+                matches = self._current_dataframe.apply(
+                    lambda row: company_key(row.get("KUNDENNAME", ""), row.get("CITY", "")) == target,
+                    axis=1,
+                )
+            if not matches.any():
+                continue
+            row = self._current_dataframe.loc[matches].iloc[0].to_dict()
+            row["WEBSITE"] = website
+            websites += 1
+            if not force_refresh and EnrichmentService.is_analysis_current(row.get("ANALYZED_AT", "")):
+                skipped_current += 1
+                continue
+            rows.append(row)
+        return rows, websites, skipped_current
+
+    def _offer_enrichment_after_research(self, summary):
+        if summary.aborted:
+            self.status_changed.emit(
+                "Recherche abgebrochen. Bereits gefundene Websites können später über ‚Websites analysieren‘ geprüft werden."
+            )
+            return
+        if not self.settings["research"].get("offer_enrichment_after_research", True):
+            return
+        if self._enrichment_thread is not None:
+            self.status_changed.emit("Es läuft bereits eine Websiteanalyse.")
+            return
+        customers, website_count, _skipped = self._post_research_enrichment_selection(summary)
+        if not customers:
+            self.status_changed.emit("Keine neue Websiteanalyse erforderlich.")
+            return
+        from models.research_run_summary import PostResearchEnrichmentOffer
+        offer = PostResearchEnrichmentOffer(
+            customers=customers, processed_count=len(summary.processed_customer_keys),
+            website_count=website_count, pending_count=len(customers),
+            error_count=summary.error_count, single=len(summary.processed_customer_keys) == 1,
+        )
+        self._pending_post_research_offer = (summary, offer)
+        self.post_research_enrichment_offer_requested.emit(offer)
+
+    @Slot(bool, bool, bool)
+    def _handle_post_research_enrichment_decision(self, accepted, force_refresh, do_not_ask):
+        pending = self._pending_post_research_offer
+        self._pending_post_research_offer = None
+        if do_not_ask:
+            settings = Settings.normalize(self.settings)
+            settings["research"]["offer_enrichment_after_research"] = False
+            try:
+                self.settings = self.settings_store.save(settings)
+            except OSError as error:
+                logger.warning("Websiteanalyse-Abfrage konnte nicht gespeichert werden: {}", error)
+        if not accepted or pending is None:
+            return
+        summary, _offer = pending
+        customers, _website_count, _skipped = self._post_research_enrichment_selection(
+            summary, force_refresh=force_refresh
+        )
+        if not customers:
+            self.status_changed.emit("Keine neue Websiteanalyse erforderlich.")
+            return
+        self.start_enrichment(customers, force_refresh)
+
+    def _start_research_worker(self, working_list, force_refresh=False, use_street_matching=True):
         if self._thread is not None:
             return
 
         from workers.research_worker import ResearchWorker
+        self._active_research_mode = self._next_research_mode
+        self._next_research_mode = "bulk"
+        self._active_research_force_refresh = bool(force_refresh)
+        self._active_research_run = self._new_research_run_state(
+            self._active_research_mode, force_refresh, len(working_list)
+        )
         self._thread = QThread(self)
-        self._worker = ResearchWorker(working_list, force_refresh=force_refresh)
+        self._worker = ResearchWorker(
+            working_list,
+            force_refresh=force_refresh,
+            use_street_matching=use_street_matching,
+        )
         self._worker.moveToThread(self._thread)
 
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._on_research_progress)
-        self._worker.result_ready.connect(self._apply_research_result)
+        self._worker.result_ready.connect(self._on_research_result_ready)
+        self._worker.item_failed.connect(self._record_research_failure)
         self._worker.report_ready.connect(self._set_last_report)
         self._worker.finished.connect(self._on_research_finished)
         self._worker.error.connect(self._on_research_error)
@@ -1815,13 +2217,22 @@ class ApplicationController(QObject):
 
         self._cancel_requested = False
         logger.info(
-            "Massenrecherche gestartet: {} Firmen, force_refresh={}",
+            "Massenrecherche gestartet: {} Firmen, force_refresh={}, Straßenabgleich={}",
             len(working_list),
             force_refresh,
+            use_street_matching,
         )
         self.progress_dialog_requested.emit(len(working_list))
         self.status_changed.emit("Massenrecherche gestartet.")
         self._thread.start()
+
+    @staticmethod
+    def _new_research_run_state(mode, force_refresh=False, expected_results=0):
+        from models.research_run_summary import ResearchRunState
+        return ResearchRunState(
+            mode=mode, force_refresh=bool(force_refresh),
+            pending_result_count=int(expected_results),
+        )
 
     @Slot()
     def cancel_research(self):
@@ -1837,6 +2248,37 @@ class ApplicationController(QObject):
     def _on_research_progress(self, current, total, company, status):
         self.research_progress_changed.emit(current, total, company, status)
         self.status_changed.emit(f"Recherche {current}/{total}: {company} ({status})")
+
+    @Slot(object)
+    def _on_research_result_ready(self, result):
+        """Apply first, then record the result in this run's isolated state."""
+        self._apply_research_result(result)
+        state = self._active_research_run
+        if state is None or state.finalized:
+            return
+        key = self._research_result_key(result)
+        state.results.append(result)
+        state.processed_customer_keys.append(key)
+        state.result_count += 1
+        success = bool(getattr(result, "success", True)) and not str(getattr(result, "error_message", "")).strip()
+        if success:
+            state.successful_customer_keys.append(key)
+            if self._valid_enrichment_website(getattr(result, "website", "")):
+                state.website_customer_keys.append(key)
+        else:
+            state.failed_customer_keys.append(key)
+        if state.finished_received:
+            state.pending_result_count = max(0, state.pending_result_count - 1)
+            if state.pending_result_count == 0 and self._thread is None:
+                QTimer.singleShot(0, self._finalize_research_run)
+
+    @Slot(object)
+    def _record_research_failure(self, key):
+        state = self._active_research_run
+        if state is not None and not state.finalized:
+            stable = ("company", tuple(key))
+            if stable not in state.failed_customer_keys:
+                state.failed_customer_keys.append(stable)
 
     @Slot(object)
     def _apply_research_result(self, result):
@@ -1867,10 +2309,21 @@ class ApplicationController(QObject):
                         by_id = frame[column].astype(str) == str(customer_id)
                         if by_id.any():
                             return by_id
-            return frame.apply(
+            by_company_city = frame.apply(
                 lambda row: company_key(row.get("KUNDENNAME", ""), row.get("CITY", "")) == target_key,
                 axis=1,
             )
+            from models.address_utils import STREET_COLUMNS, first_value, normalize_street
+            result_street = normalize_street(getattr(result, "street", ""))
+            if result_street.usable:
+                by_street = frame.apply(
+                    lambda row: normalize_street(first_value(row, STREET_COLUMNS)) == result_street,
+                    axis=1,
+                )
+                precise = by_company_city & by_street
+                if precise.any():
+                    return precise
+            return by_company_city
 
         current_matches = matching_rows(self._current_dataframe)
         if current_matches is None or not current_matches.any():
@@ -1905,7 +2358,7 @@ class ApplicationController(QObject):
         filters_active = bool(
             self._active_search_text
             or self._show_followups_only
-            or self._crm_filter.get("stage", "Alle Kundenstatus") != "Alle Kundenstatus"
+            or self._crm_filter.get("status", "all") != "all"
             or self._crm_filter.get("priority", "Alle Prioritäten") != "Alle Prioritäten"
             or self._crm_filter.get("tag", "")
             or self._enrichment_filter.get("score", "Alle Website-Scores") != "Alle Website-Scores"
@@ -1920,7 +2373,7 @@ class ApplicationController(QObject):
         else:
             visible = self._current_dataframe
             rows = [position for position, matched in enumerate(current_matches.tolist()) if matched]
-            self.customer_rows_updated.emit(rows, list(values))
+            self.customer_rows_updated.emit(rows, values)
         self.visible_count_changed.emit(len(visible), len(self._current_dataframe))
 
         selected_matches = False
@@ -1937,12 +2390,19 @@ class ApplicationController(QObject):
                     self._selected_customer.get("KUNDENNAME", ""),
                     self._selected_customer.get("CITY", ""),
                 ) == target_key
+                from models.address_utils import STREET_COLUMNS, first_value, normalize_street
+                result_street = normalize_street(getattr(result, "street", ""))
+                if selected_matches and result_street.usable:
+                    selected_matches = (
+                        normalize_street(first_value(self._selected_customer, STREET_COLUMNS))
+                        == result_street
+                    )
         if selected_matches:
             details = dict(self._selected_customer)
             details.update(values)
             self._selected_customer = details
             self.customer_details_changed.emit(details)
-        self._update_dashboard()
+        self._schedule_dashboard_update()
 
     @Slot(list, bool)
     def _on_research_finished(self, results, cancelled):
@@ -1966,29 +2426,58 @@ class ApplicationController(QObject):
                         lambda row: company_key(row.get("KUNDENNAME", ""), row.get("CITY", "")) == key,
                         axis=1,
                     )
+                    from models.address_utils import STREET_COLUMNS, first_value, normalize_street
+                    selected_street = normalize_street(first_value(self._selected_customer, STREET_COLUMNS))
+                    if selected_street.usable:
+                        street_matches = self._current_dataframe.apply(
+                            lambda row: normalize_street(first_value(row, STREET_COLUMNS)) == selected_street,
+                            axis=1,
+                        )
+                        precise_matches = matches & street_matches
+                        if precise_matches.any():
+                            matches = precise_matches
                 if matches.any():
                     self._selected_customer = self._current_dataframe.loc[matches].iloc[0].to_dict()
                     self.customer_details_changed.emit(self._selected_customer)
-            self._update_dashboard()
+            self._flush_dashboard_update()
         self.license_service.record_researches(sum(1 for result in results if getattr(result, "source", "") != "SQLite"))
         report = self._last_research_report
+        processed = len(results)
+        updated = sum(bool(getattr(change, "changed_fields", ())) for change in report.changes) if report else processed
+        errors = report.errors if report else 0
+        summary = f"{processed} Firmen verarbeitet – {updated} aktualisiert – {errors} Fehler"
         if cancelled:
             logger.info("Massenrecherche abgebrochen ({} Ergebnisse).", len(results))
-            message = report.summary_text() if report else f"Recherche abgebrochen: {len(results)} Firmen wurden geprüft."
+            message = f"Recherche abgebrochen – {summary}"
             status = "Recherche abgebrochen."
         else:
             logger.info("Massenrecherche beendet ({} Ergebnisse).", len(results))
-            message = report.summary_text() if report else f"{len(results)} Firmen wurden geprüft."
+            message = summary
             status = "Recherche abgeschlossen."
-        self.information_requested.emit(
-            "Recherche", message
-        )
         self.status_changed.emit(message)
+        state = self._active_research_run
+        if state is None:
+            from models.research_run_summary import ResearchRunState
+            state = ResearchRunState(self._active_research_mode, self._active_research_force_refresh)
+            self._active_research_run = state
+            for result in results:
+                key = self._research_result_key(result)
+                state.results.append(result); state.processed_customer_keys.append(key)
+                state.result_count += 1
+                if bool(getattr(result, "success", True)) and not str(getattr(result, "error_message", "")).strip():
+                    state.successful_customer_keys.append(key)
+                    if self._valid_enrichment_website(getattr(result, "website", "")):
+                        state.website_customer_keys.append(key)
+        state.finished_received = True
+        state.aborted = bool(cancelled)
+        state.error_count = int(errors or 0)
+        state.completion_message = message
+        state.pending_result_count = max(0, len(results) - state.result_count)
 
     @Slot(object)
     def _set_last_report(self, report):
         self._last_research_report = report
-        self._update_dashboard()
+        self._schedule_dashboard_update()
         try:
             AppConfig.create_directories()
             (AppConfig.REPORT_DIR / "last_research_report.json").write_text(
@@ -2054,8 +2543,12 @@ class ApplicationController(QObject):
     def _on_research_error(self, message):
         logger.error("Massenrecherche fehlgeschlagen: {}", message)
         self.progress_dialog_close_requested.emit()
+        self._flush_dashboard_update()
         self.error_requested.emit("Recherche", message)
         self.status_changed.emit("Recherche fehlgeschlagen.")
+        if self._active_research_run is not None:
+            self._active_research_run.finished_received = True
+            self._active_research_run.finalized = True
 
     @Slot()
     def _cleanup_worker(self):
@@ -2063,6 +2556,38 @@ class ApplicationController(QObject):
             self._thread.deleteLater()
         self._worker = None
         self._thread = None
-        if self._close_after_research:
+        closing = getattr(self, "_close_after_research", False)
+        if not closing:
+            QTimer.singleShot(0, self._finalize_research_run)
+        if closing:
+            if self._active_research_run is not None:
+                self._active_research_run.finalized = True
             self._close_after_research = False
             self.window.close()
+
+    @Slot()
+    def _finalize_research_run(self):
+        """Finalize exactly once after results, worker cleanup and dialog cleanup."""
+        from models.research_run_summary import ResearchRunSummary
+
+        state = self._active_research_run
+        if state is None or state.finalized or not state.finished_received:
+            return
+        if self._thread is not None or self._worker is not None or state.pending_result_count:
+            return
+        state.finalized = True
+        summary = ResearchRunSummary(
+            research_mode=state.mode,
+            processed_customer_keys=list(state.processed_customer_keys),
+            successful_customer_keys=list(state.successful_customer_keys),
+            website_customer_keys=list(state.website_customer_keys),
+            results=list(state.results), error_count=state.error_count,
+            aborted=state.aborted, force_refresh=state.force_refresh,
+        )
+        logger.info(
+            "Recherchelauf finalisiert: Modus={} Ergebnisse={} Websites={} Fehler={} Abbruch={}",
+            state.mode, state.result_count, len(state.website_customer_keys), state.error_count, state.aborted,
+        )
+        if state.completion_message:
+            self.information_requested.emit("Recherche", state.completion_message)
+        self._offer_enrichment_after_research(summary)

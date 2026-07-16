@@ -77,7 +77,7 @@ def release(tag="v1.2.3", **values):
 
 @pytest.mark.parametrize(
     ("tag", "available"),
-    (("v1.3.0", False), ("1.3.1", True), ("1.4.0", True), ("2.0.0", True)),
+    (("v1.3.2", False), ("1.3.3", True), ("1.4.0", True), ("2.0.0", True)),
 )
 def test_version_comparison_and_leading_v(tag, available):
     service = UpdateService(FakeSession([FakeResponse(release(tag))]))

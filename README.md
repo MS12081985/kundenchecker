@@ -110,7 +110,7 @@ python app.py
 
 Aktuelle Version:
 
-**v1.3.0**
+**v1.3.2**
 
 ---
 
@@ -186,7 +186,7 @@ Automatisierte Tests:
 ## macOS-App
 
 Der lokale Build erzeugt mit `scripts/build_macos.sh` eine nicht signierte
-`dist/KundenChecker.app` und `release/KundenChecker-1.3.0.dmg`. Beim ersten
+`dist/KundenChecker.app` und `release/KundenChecker-1.3.2.dmg`. Beim ersten
 Start kann macOS einen Sicherheitshinweis anzeigen; dann per Rechtsklick →
 Öffnen starten. Für die lokale App gelten die Hinweise in `BUILDING.md`.
 ## CRM und Google Maps (1.2.0)
@@ -244,6 +244,19 @@ wie HTTPS/TLS, Impressum, Datenschutz, Kontaktseite, Kontaktformular,
 ein transparenter Website-Score, eine regelbasierte Branchenzuordnung und eine
 kurze, lokal erzeugte Beschreibung. Die Anreicherungsfelder können im
 Kundenexport ein- oder ausgeschlossen werden.
+
+Aus einer vorhandenen Impressumsseite werden außerdem nur klar belegte
+Unternehmensangaben wie Inhaber und Geschäftsführung, Rechtsform,
+Impressumsadresse, validierte Kontaktdaten, Umsatzsteuer-ID sowie
+Handelsregister und Registergericht extrahiert. Diese Angaben bleiben getrennte
+Analysefelder und überschreiben Recherche- oder CRM-Daten nicht automatisch.
+
+Über **Recherche → Alle Websites analysieren** lässt sich eine Massenanalyse für
+sichtbare, geladene oder markierte Kunden starten. Zusätzlich können noch nicht
+analysierte, veraltete, schwache oder zuvor fehlerhafte Websites ausgewählt
+werden. Eine Vorschau zeigt Arbeitsliste und übersprungene aktuelle Analysen;
+fertige Ergebnisse erscheinen bereits während der laufenden Analyse in der
+Kundenansicht.
 
 Die Funktion verwendet keine kostenpflichtige API und keine Cloud-KI. Es werden
 keine Kundendaten an einen KI-Anbieter übertragen, keine Google-Bewertungen

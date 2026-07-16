@@ -44,7 +44,14 @@ class EnrichmentWorker(QObject):
                     self.progress.emit(current, total, company, result.enrichment_status)
                 except Exception as error:
                     logger.exception("Websiteanalyse fehlgeschlagen: {}", company)
-                    self.item_error.emit(company, str(error))
+                    customer_id = next((customer.get(name) for name in ("id", "ID", "KUNDEN_ID", "CUSTOMER_ID") if name in customer), None)
+                    result = self.service.failure_result(
+                        company, city, str(customer.get("WEBSITE", "")).strip(), customer_id, error
+                    )
+                    results.append(result)
+                    self.result_ready.emit(result)
+                    self.item_error.emit(company, result.enrichment_error)
+                    self.progress.emit(current, total, company, "Fehler")
             self.finished.emit(results, self.cancelled)
         except Exception as error:
             logger.exception("EnrichmentWorker abgebrochen")

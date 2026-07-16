@@ -127,6 +127,7 @@ class DetailPanel(QWidget):
         layout.addWidget(self.btn_maps)
 
         analysis_group = QGroupBox("Websiteanalyse")
+        analysis_group.setObjectName("website_analysis_group")
         analysis_form = QFormLayout(analysis_group)
         analysis_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         analysis_form.setRowWrapPolicy(QFormLayout.WrapLongRows)
@@ -136,19 +137,32 @@ class DetailPanel(QWidget):
         self.enrichment_contact = QLabel("–")
         self.enrichment_hours = QLabel("–")
         self.enrichment_industry = QLabel("–")
+        self.enrichment_owner = QLabel("–")
+        self.enrichment_management = QLabel("–")
+        self.enrichment_legal_form = QLabel("–")
+        self.enrichment_register = QLabel("–")
+        self.enrichment_vat = QLabel("–")
         self.enrichment_social = QLabel("–")
         self.enrichment_description = QLabel("–")
         self.enrichment_analyzed_at = QLabel("–")
         for label in (self.enrichment_score, self.enrichment_https, self.enrichment_legal,
                       self.enrichment_contact, self.enrichment_hours, self.enrichment_industry,
+                      self.enrichment_owner, self.enrichment_management, self.enrichment_legal_form,
+                      self.enrichment_register, self.enrichment_vat,
                       self.enrichment_social, self.enrichment_description, self.enrichment_analyzed_at):
             label.setWordWrap(True); label.setMinimumWidth(0); label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.enrichment_description.setMinimumHeight(36)
         analysis_form.addRow("Score:", self.enrichment_score)
         analysis_form.addRow("HTTPS / SSL:", self.enrichment_https)
         analysis_form.addRow("Impressum / Datenschutz:", self.enrichment_legal)
         analysis_form.addRow("Kontaktseite / Formular:", self.enrichment_contact)
         analysis_form.addRow("Öffnungszeiten:", self.enrichment_hours)
         analysis_form.addRow("Branche:", self.enrichment_industry)
+        analysis_form.addRow("Inhaber:", self.enrichment_owner)
+        analysis_form.addRow("Geschäftsführung:", self.enrichment_management)
+        analysis_form.addRow("Rechtsform:", self.enrichment_legal_form)
+        analysis_form.addRow("Handelsregister:", self.enrichment_register)
+        analysis_form.addRow("USt-IdNr.:", self.enrichment_vat)
         analysis_form.addRow("Social Media:", self.enrichment_social)
         analysis_form.addRow("Kurzbeschreibung:", self.enrichment_description)
         analysis_form.addRow("Analysiert:", self.enrichment_analyzed_at)
@@ -165,6 +179,17 @@ class DetailPanel(QWidget):
         self.btn_open_privacy.clicked.connect(lambda: self.enrichment_url_requested.emit(self.btn_open_privacy.property("url") or ""))
         for button in (self.btn_enrich, self.btn_enrich_refresh, self.btn_enrichment_details, self.btn_open_imprint, self.btn_open_privacy):
             layout.addWidget(button)
+
+        # Keep the single analysis group directly below the normal customer details.
+        for position, widget in enumerate((
+            analysis_group,
+            self.btn_enrich,
+            self.btn_enrich_refresh,
+            self.btn_enrichment_details,
+            self.btn_open_imprint,
+            self.btn_open_privacy,
+        ), start=2):
+            layout.insertWidget(position, widget)
 
         self.btn_check = QPushButton("🔍 Firma prüfen")
         self.btn_bulk = QPushButton("▶ Alle Firmen prüfen")
@@ -288,7 +313,8 @@ class DetailPanel(QWidget):
         getter = data.get if isinstance(data, dict) else lambda key, default=None: getattr(data, key, default)
         score = getter("WEBSITE_SCORE", getter("website_score", ""))
         category = getter("WEBSITE_SCORE_CATEGORY", getter("website_score_category", ""))
-        self.enrichment_score.setText(f"{score}/100 – {category}" if score != "" else "–")
+        score_text = str(int(score)) if isinstance(score, float) and score.is_integer() else str(score)
+        self.enrichment_score.setText(f"{score_text}/100 – {category}" if score != "" else "–")
         https = getter("HAS_HTTPS", getter("has_https", False)); ssl_valid = getter("SSL_VALID", getter("ssl_valid", False))
         self.enrichment_https.setText(f"HTTPS: {'Ja' if https else 'Nein'} | SSL: {'Gültig' if ssl_valid else 'Nein/ungeprüft'}")
         imprint = getter("HAS_IMPRINT", getter("has_imprint", False)); privacy = getter("HAS_PRIVACY_POLICY", getter("has_privacy_policy", False))
@@ -302,15 +328,54 @@ class DetailPanel(QWidget):
         confidence = getter("INDUSTRY_CONFIDENCE", "")
         if not industry and not isinstance(data, dict): industry, confidence = data.industry.industry, data.industry.confidence
         self.enrichment_industry.setText(f"{industry} ({float(confidence):.0%})" if industry and confidence != "" else display_value(industry, "–"))
+        typed_imprint = getter("imprint_data", None)
+        imprint_confidence = getter("IMPRINT_CONFIDENCE", "")
+        if imprint_confidence == "" and typed_imprint is not None:
+            imprint_confidence = getattr(typed_imprint, "imprint_extraction_confidence", 0.0)
+        show_compact_imprint = bool(imprint_confidence != "" and float(imprint_confidence) >= 0.5)
+        def imprint_value(column, attribute):
+            if not show_compact_imprint:
+                return "–"
+            value = getter(column, "")
+            if not value and typed_imprint is not None:
+                value = getattr(typed_imprint, attribute, "")
+                if isinstance(value, (list, tuple)):
+                    value = ", ".join(value)
+            return display_value(value, "–")
+        owner = imprint_value("IMPRINT_OWNER_NAMES", "owner_names")
+        management = imprint_value("IMPRINT_MANAGING_DIRECTOR_NAMES", "managing_director_names")
+        legal_form = imprint_value("IMPRINT_LEGAL_FORM", "legal_form")
+        register_type = imprint_value("IMPRINT_REGISTER_TYPE", "commercial_register_type")
+        register_number = imprint_value("IMPRINT_REGISTER_NUMBER", "commercial_register_number")
+        register_court = imprint_value("IMPRINT_REGISTER_COURT", "register_court")
+        register = " ".join(value for value in (register_type if register_type != "–" else "", register_number if register_number != "–" else "") if value)
+        if register_court != "–":
+            register = f"{register}, {register_court}" if register else register_court
+        self.enrichment_owner.setText(owner); self.enrichment_management.setText(management)
+        self.enrichment_legal_form.setText(legal_form); self.enrichment_register.setText(register or "–")
+        self.enrichment_vat.setText(imprint_value("IMPRINT_VAT_ID", "vat_id"))
+        for label in (self.enrichment_owner, self.enrichment_management, self.enrichment_legal_form, self.enrichment_register, self.enrichment_vat):
+            label.setToolTip(label.text() if label.text() != "–" else "")
         social = getter("SOCIAL_MEDIA", "")
         if not social and not isinstance(data, dict): social = ", ".join(data.social_media.active_platforms())
         self.enrichment_social.setText(display_value(social, "–"))
-        self.enrichment_description.setText(display_value(getter("SHORT_DESCRIPTION", getter("short_description", "")), "–"))
+        description = display_value(getter("SHORT_DESCRIPTION", getter("short_description", "")), "–")
+        self.enrichment_description.setText(description)
+        self.enrichment_description.setToolTip(description if description != "–" else "")
         self.enrichment_analyzed_at.setText(display_value(getter("ANALYZED_AT", getter("analyzed_at", "")), "–"))
         imprint_url = getter("IMPRINT_URL", getter("imprint_url", "")); privacy_url = getter("PRIVACY_URL", getter("privacy_url", ""))
         self.btn_open_imprint.setProperty("url", imprint_url); self.btn_open_imprint.setEnabled(bool(imprint_url))
         self.btn_open_privacy.setProperty("url", privacy_url); self.btn_open_privacy.setEnabled(bool(privacy_url))
-        self.btn_enrichment_details.setEnabled(bool(score != ""))
+        website = display_value(getter("WEBSITE", getter("website", "")))
+        analyzed_at = display_value(getter("ANALYZED_AT", getter("analyzed_at", "")))
+        enrichment_status = display_value(getter("ENRICHMENT_STATUS", getter("enrichment_status", "")))
+        analyzed = bool(analyzed_at or (enrichment_status and enrichment_status != "Nicht analysiert"))
+        self.btn_enrich.setEnabled(bool(website) and not analyzed)
+        self.btn_enrich_refresh.setEnabled(bool(website) and analyzed)
+        self.btn_enrichment_details.setEnabled(analyzed)
+        missing_website_tooltip = "Für diesen Kunden ist keine sicher zugeordnete Website vorhanden."
+        self.btn_enrich.setToolTip(missing_website_tooltip if not website else "")
+        self.btn_enrich_refresh.setToolTip(missing_website_tooltip if not website else "")
 
     def open_website(self, url):
 

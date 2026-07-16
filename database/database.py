@@ -118,6 +118,7 @@ class Database:
                     company_key TEXT NOT NULL UNIQUE,
                     website TEXT NOT NULL DEFAULT '',
                     result_json TEXT NOT NULL,
+                    imprint_data_json TEXT NOT NULL DEFAULT '{}',
                     website_score INTEGER NOT NULL DEFAULT 0,
                     industry TEXT NOT NULL DEFAULT '',
                     has_imprint INTEGER NOT NULL DEFAULT 0,
@@ -136,6 +137,7 @@ class Database:
                 "company_id": "INTEGER REFERENCES companies(id) ON DELETE SET NULL",
                 "company_key": "TEXT NOT NULL DEFAULT ''",
                 "website": "TEXT NOT NULL DEFAULT ''", "result_json": "TEXT NOT NULL DEFAULT '{}'",
+                "imprint_data_json": "TEXT NOT NULL DEFAULT '{}'",
                 "website_score": "INTEGER NOT NULL DEFAULT 0", "industry": "TEXT NOT NULL DEFAULT ''",
                 "has_imprint": "INTEGER NOT NULL DEFAULT 0", "has_privacy_policy": "INTEGER NOT NULL DEFAULT 0",
                 "has_opening_hours": "INTEGER NOT NULL DEFAULT 0", "has_social_media": "INTEGER NOT NULL DEFAULT 0",
@@ -324,13 +326,14 @@ class Database:
             conn.execute("BEGIN")
             conn.execute("""
                 INSERT INTO company_enrichment (
-                    company_id, company_key, website, result_json, website_score, industry,
+                    company_id, company_key, website, result_json, imprint_data_json, website_score, industry,
                     has_imprint, has_privacy_policy, has_opening_hours, has_social_media,
                     analyzed_at, analysis_version, enrichment_status, enrichment_error, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(company_key) DO UPDATE SET
                     company_id=excluded.company_id, website=excluded.website,
-                    result_json=excluded.result_json, website_score=excluded.website_score,
+                    result_json=excluded.result_json, imprint_data_json=excluded.imprint_data_json,
+                    website_score=excluded.website_score,
                     industry=excluded.industry, has_imprint=excluded.has_imprint,
                     has_privacy_policy=excluded.has_privacy_policy,
                     has_opening_hours=excluded.has_opening_hours,
@@ -340,7 +343,9 @@ class Database:
                     enrichment_error=excluded.enrichment_error, updated_at=excluded.updated_at
             """, (
                 result.customer_id, result.company_key, result.website,
-                json.dumps(payload, ensure_ascii=False), result.website_score, result.industry.industry,
+                json.dumps(payload, ensure_ascii=False),
+                json.dumps(payload.get("imprint_data", {}), ensure_ascii=False),
+                result.website_score, result.industry.industry,
                 int(result.has_imprint), int(result.has_privacy_policy), int(result.has_opening_hours),
                 int(any(social.values())), result.analyzed_at, result.analysis_version,
                 result.enrichment_status, result.enrichment_error,
@@ -374,6 +379,16 @@ class Database:
                        SUM(has_opening_hours = 1), SUM(has_social_media = 1)
                 FROM company_enrichment WHERE enrichment_status = 'Erfolgreich'
             """).fetchone()
+        finally:
+            conn.close()
+
+    def get_enrichment_error_count(self):
+        conn = self.connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM company_enrichment WHERE enrichment_status = 'Fehler'"
+            ).fetchone()
+            return int(row[0] or 0)
         finally:
             conn.close()
 

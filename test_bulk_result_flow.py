@@ -29,10 +29,10 @@ def controller_with(rows):
     return controller
 
 
-def result(company="Firma", city="Berlin", customer_id=None, status="Vollständig"):
+def result(company="Firma", city="Berlin", customer_id=None, status="Vollständig", street=""):
     return ResearchResult(
         company, city, "https://firma.de/", "+49 30 123456", "info@firma.de", "",
-        status, "Website", customer_id, "2026-07-16 10:00",
+        status, "Website", customer_id, "2026-07-16 10:00", street=street,
     )
 
 
@@ -129,7 +129,7 @@ def test_same_name_different_city_is_mapped_correctly():
         {"ID": 2, "KUNDENNAME": "Firma", "CITY": "Hamburg"},
     ])
     controller._apply_research_result(result("Firma", "Hamburg", None))
-    assert controller._current_dataframe.iloc[0]["EMAIL"] == ""
+    assert clean_missing(controller._current_dataframe.iloc[0]["EMAIL"]) == ""
     assert controller._current_dataframe.iloc[1]["EMAIL"] == "info@firma.de"
 
 
@@ -164,3 +164,100 @@ def test_single_research_uses_common_result_application(monkeypatch):
     monkeypatch.setattr(controller, "_apply_research_result", applied.append)
     controller._research_selected(False)
     assert applied == [researched]
+
+
+def test_second_of_100_bulk_results_is_visible_before_research_finishes():
+    controller = ApplicationController()
+    frame = pd.DataFrame(
+        [{"ID": number, "KUNDENNAME": f"Firma {number}", "CITY": "Berlin"} for number in range(1, 101)]
+    )
+    controller.customer_service.set_dataframe(frame)
+    controller._current_dataframe = controller.customer_service.get_dataframe()
+    controller.customers_changed.emit(controller._current_dataframe)
+
+    controller._apply_research_result(result("Firma 1", "Berlin", 1))
+    first_snapshot = controller.window.table_model._df
+    controller._apply_research_result(result("Firma 2", "Berlin", 2))
+
+    assert first_snapshot is controller.window.table_model._df
+    assert controller.window.table_model._df.iloc[0]["EMAIL"] == "info@firma.de"
+    assert controller.window.table_model._df.iloc[1]["EMAIL"] == "info@firma.de"
+    assert controller._current_dataframe.iloc[1]["EMAIL"] == "info@firma.de"
+
+
+def test_street_selects_correct_duplicate_without_database_id():
+    controller = ApplicationController()
+    frame = pd.DataFrame([
+        {"KUNDENNAME": "Firma", "CITY": "Berlin", "STRASSE": "Hauptstraße 1"},
+        {"KUNDENNAME": "Firma", "CITY": "Berlin", "STRASSE": "Nebenweg 2"},
+    ])
+    controller.customer_service.set_dataframe(frame)
+    controller._current_dataframe = controller.customer_service.get_dataframe()
+    controller.customers_changed.emit(controller._current_dataframe)
+
+    controller._apply_research_result(result(street="Nebenweg 2"))
+
+    assert clean_missing(controller._current_dataframe.iloc[0]["EMAIL"]) == ""
+    assert controller._current_dataframe.iloc[1]["EMAIL"] == "info@firma.de"
+
+
+def test_live_result_preserves_existing_crm_data():
+    controller = ApplicationController()
+    frame = pd.DataFrame([{
+        "ID": 1, "KUNDENNAME": "Firma", "CITY": "Berlin",
+        "NOTIZEN": "Wichtige Notiz", "KUNDENSTATUS": "Interessent",
+    }])
+    controller.customer_service.set_dataframe(frame)
+    controller._current_dataframe = controller.customer_service.get_dataframe()
+    controller.customers_changed.emit(controller._current_dataframe)
+    controller._apply_research_result(result(customer_id=1))
+    row = controller._current_dataframe.iloc[0]
+    assert row["NOTIZEN"] == "Wichtige Notiz"
+    assert row["KUNDENSTATUS"] == "Interessent"
+
+
+def test_dashboard_updates_are_throttled_and_flushed(monkeypatch):
+    controller = controller_with([
+        {"ID": number, "KUNDENNAME": f"Firma {number}", "CITY": "Berlin"}
+        for number in range(1, 6)
+    ])
+    updates = []
+    monkeypatch.setattr(controller, "_update_dashboard", lambda: updates.append(True))
+
+    for number in range(1, 6):
+        controller._apply_research_result(result(f"Firma {number}", "Berlin", number))
+
+    assert updates == []
+    assert controller._dashboard_update_timer.isActive()
+    controller._flush_dashboard_update()
+    assert updates == [True]
+    assert not controller._dashboard_update_timer.isActive()
+
+
+def test_export_snapshot_contains_only_results_received_so_far():
+    controller = controller_with([
+        {"ID": 1, "KUNDENNAME": "Firma 1", "CITY": "Berlin"},
+        {"ID": 2, "KUNDENNAME": "Firma 2", "CITY": "Berlin"},
+    ])
+    controller._apply_research_result(result("Firma 1", "Berlin", 1))
+
+    snapshot = controller._customer_export_selection({"scope": "all_loaded"})
+
+    assert snapshot.iloc[0]["EMAIL"] == "info@firma.de"
+    assert clean_missing(snapshot.iloc[1]["EMAIL"]) == ""
+
+
+def test_cancelled_research_keeps_results_already_applied():
+    controller = controller_with([
+        {"ID": 1, "KUNDENNAME": "Firma 1", "CITY": "Berlin"},
+        {"ID": 2, "KUNDENNAME": "Firma 2", "CITY": "Berlin"},
+    ])
+    researched = result("Firma 1", "Berlin", 1)
+    controller._apply_research_result(researched)
+    controller.license_service = type("License", (), {"record_researches": lambda *_: None})()
+    controller.information_requested.disconnect(controller.window.show_information)
+
+    controller._on_research_finished([researched], True)
+
+    assert controller.window.table_model._df.iloc[0]["EMAIL"] == "info@firma.de"
+    assert clean_missing(controller.window.table_model._df.iloc[1]["EMAIL"]) == ""

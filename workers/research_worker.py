@@ -1,3 +1,5 @@
+from inspect import Parameter, signature
+
 from PySide6.QtCore import QObject, Signal, Slot
 from loguru import logger
 
@@ -15,12 +17,14 @@ class ResearchWorker(QObject):
     finished = Signal(list, bool)
     error = Signal(str)
     report_ready = Signal(object)
+    item_failed = Signal(object)
 
-    def __init__(self, dataframe, force_refresh: bool = False):
+    def __init__(self, dataframe, force_refresh: bool = False, use_street_matching: bool = True):
         super().__init__()
 
         self.dataframe = dataframe
         self.force_refresh = force_refresh
+        self.use_street_matching = use_street_matching
         self.service = BulkResearchService()
 
     @Slot()
@@ -33,23 +37,18 @@ class ResearchWorker(QObject):
             for _, row in self.dataframe.iterrows():
                 key = (str(row.get("KUNDENNAME", "")).strip(), str(row.get("CITY", "")).strip())
                 self._before.setdefault(key, []).append(dict(row))
-            try:
-                results = self.service.research_dataframe(
-                    self.dataframe,
-                    progress_callback=self.on_progress,
-                    force_refresh=self.force_refresh,
-                    error_callback=self.on_error,
-                )
-            except TypeError as exc:
-                # Kompatibilität mit einfachen Test-/Drittanbieter-Services,
-                # die die optionale Fehler-Rückmeldung noch nicht kennen.
-                if "error_callback" not in str(exc):
-                    raise
-                results = self.service.research_dataframe(
-                    self.dataframe,
-                    progress_callback=self.on_progress,
-                    force_refresh=self.force_refresh,
-                )
+            research_dataframe = self.service.research_dataframe
+            parameters = signature(research_dataframe).parameters
+            supports_kwargs = any(item.kind == Parameter.VAR_KEYWORD for item in parameters.values())
+            kwargs = {
+                "progress_callback": self.on_progress,
+                "force_refresh": self.force_refresh,
+            }
+            if supports_kwargs or "error_callback" in parameters:
+                kwargs["error_callback"] = self.on_error
+            if supports_kwargs or "use_street_matching" in parameters:
+                kwargs["use_street_matching"] = self.use_street_matching
+            results = research_dataframe(self.dataframe, **kwargs)
 
             cancelled = self.service.cancelled
             logger.info(
@@ -94,4 +93,5 @@ class ResearchWorker(QObject):
 
     def on_error(self, current, total, company, city, message):
         self.report.add_error(ResearchError(company, city, message))
+        self.item_failed.emit((str(company).strip(), str(city).strip()))
         self.progress.emit(current, total, company, "Fehler")

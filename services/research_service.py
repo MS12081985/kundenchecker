@@ -27,9 +27,12 @@ class ResearchResult:
     zipcode: str = ""
     country: str = ""
     match_reason: str = ""
+    success: bool = True
+    changed: bool = True
+    error_message: str = ""
 
     def __post_init__(self):
-        for field in ("company", "city", "website", "phone", "email", "owner", "status", "source", "last_check", "street", "zipcode", "country", "match_reason"):
+        for field in ("company", "city", "website", "phone", "email", "owner", "status", "source", "last_check", "street", "zipcode", "country", "match_reason", "error_message"):
             setattr(self, field, clean_missing(getattr(self, field)))
         self.zipcode = normalize_postal_code(self.zipcode)
 
@@ -41,13 +44,18 @@ class ResearchService:
         self.contact_extractor = ContactExtractor()
 
     def research(self, company_name: str, city: str = "", force_refresh: bool = False,
-                 street: str = "", zipcode: str = "", country: str = "", customer_id=None):
+                 street: str = "", zipcode: str = "", country: str = "", customer_id=None,
+                 use_street_matching: bool = True):
         street = clean_missing(street)
         zipcode = normalize_postal_code(zipcode)
         country = clean_missing(country)
         existing = self.database.get_company(company_name, city)
         stored_address = self.database.get_company_address(company_name, city) if existing and hasattr(self.database, "get_company_address") else ("", "", "")
-        address_changed = bool(normalize_street(street).usable and street_match(street, stored_address[0]) != "match")
+        address_changed = bool(
+            use_street_matching
+            and normalize_street(street).usable
+            and street_match(street, stored_address[0]) != "match"
+        )
 
         if existing and not force_refresh and not address_changed:
             logger.info("SQLite-Cache verwendet: {} ({})", company_name, city)
@@ -85,7 +93,9 @@ class ResearchService:
         if force_refresh and cached_website:
             logger.info("Vorhandene Website erneut geprüft: {}", cached_website)
             contact = self.contact_extractor.extract(cached_website)
-            address_state = self._address_state(street, zipcode, city, contact.get("addresses", []))
+            address_state = self._address_state(
+                street, zipcode, city, contact.get("addresses", []), use_street_matching
+            )
             phone = validate_phone(contact.get("phone", "")) if address_state == "match" else ""
             email = validate_email(contact.get("email", "")) if address_state == "match" else ""
             if address_state == "match" and (phone or email):
@@ -101,7 +111,9 @@ class ResearchService:
                 if not candidate_url:
                     continue
                 contact = self.contact_extractor.extract(candidate_url)
-                address_state = self._address_state(street, zipcode, city, contact.get("addresses", []))
+                address_state = self._address_state(
+                    street, zipcode, city, contact.get("addresses", []), use_street_matching
+                )
                 if address_state != "match":
                     match_reason = "Adresse auf Website nicht gefunden" if address_state == "missing" else "Straße stimmt nicht überein"
                     logger.info("Websitekandidat verworfen ({}): {}", match_reason, candidate_url)
@@ -109,7 +121,13 @@ class ResearchService:
                 website = candidate_url
                 phone = validate_phone(contact.get("phone", ""))
                 email = validate_email(contact.get("email", ""))
-                match_reason = "Adresse plausibel" if normalize_street(street).usable else "Bisherige Firmenbewertung"
+                match_reason = (
+                    "Adresse plausibel"
+                    if use_street_matching and normalize_street(street).usable
+                    else "Firmenname und Ort"
+                    if not use_street_matching
+                    else "Bisherige Firmenbewertung"
+                )
                 logger.info("WebsiteFinder-Ergebnis verwendet: {}", website)
                 break
 
@@ -145,7 +163,9 @@ class ResearchService:
         return self.website_finder.ranked_candidates(company_name, city)
 
     @staticmethod
-    def _address_state(street, zipcode, city, addresses):
+    def _address_state(street, zipcode, city, addresses, use_street_matching=True):
+        if not use_street_matching:
+            return "match"
         expected = normalize_street(street)
         if not expected.usable:
             return "match"

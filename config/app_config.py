@@ -13,7 +13,7 @@ class AppConfig:
     # --------------------------------------------------
 
     APP_NAME = "KundenChecker"
-    VERSION = "1.3.0"
+    VERSION = "1.3.2"
 
     WINDOW_WIDTH = 1500
     WINDOW_HEIGHT = 900
@@ -66,7 +66,7 @@ class AppConfig:
     ENRICHMENT_MAX_AGE_DAYS = 30
     ENRICHMENT_RATE_LIMIT_SECONDS = 0.2
     ENRICHMENT_DESCRIPTION_MAX_LENGTH = 320
-    ENRICHMENT_ANALYSIS_VERSION = "1.0"
+    ENRICHMENT_ANALYSIS_VERSION = "1.1"
     ENRICHMENT_SCORE_WEIGHTS = {
         "https": 10,
         "ssl": 5,

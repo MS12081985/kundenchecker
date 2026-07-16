@@ -51,8 +51,10 @@ class SettingsDialog(QDialog):
         self.research_timeout.setRange(1, 300)
         self.research_timeout.setSuffix(" Sekunden")
         self.auto_save_sqlite = QCheckBox("Automatische Speicherung in SQLite")
+        self.offer_enrichment = QCheckBox("Nach Firmenprüfungen Websiteanalyse anbieten")
         research_layout.addRow("Recherche-Timeout:", self.research_timeout)
         research_layout.addRow("", self.auto_save_sqlite)
+        research_layout.addRow("", self.offer_enrichment)
         layout.addWidget(research_group)
 
         export_group = QGroupBox("Export", self)
@@ -104,6 +106,7 @@ class SettingsDialog(QDialog):
         self.check_updates_on_start.setChecked(general["check_updates_on_start"])
         self.research_timeout.setValue(research["timeout"])
         self.auto_save_sqlite.setChecked(research["auto_save_sqlite"])
+        self.offer_enrichment.setChecked(research.get("offer_enrichment_after_research", True))
         self.export_directory.setText(export["directory"])
         self._set_combo_value(self.export_format, export["format"])
         self._set_combo_value(self.theme, appearance["theme"])
@@ -139,6 +142,7 @@ class SettingsDialog(QDialog):
             "research": {
                 "timeout": self.research_timeout.value(),
                 "auto_save_sqlite": self.auto_save_sqlite.isChecked(),
+                "offer_enrichment_after_research": self.offer_enrichment.isChecked(),
             },
             "export": {
                 "directory": self.export_directory.text().strip(),

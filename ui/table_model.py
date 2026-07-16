@@ -65,7 +65,7 @@ class CustomerTableModel(QAbstractTableModel):
                     return QColor(colors[status])
             return None
 
-        if role != Qt.DisplayRole:
+        if role not in (Qt.DisplayRole, Qt.EditRole):
             return None
 
         value = self._df.iat[
@@ -127,5 +127,19 @@ class CustomerTableModel(QAbstractTableModel):
         for row in sorted(set(int(value) for value in rows if 0 <= int(value) < len(self._df))):
             self.dataChanged.emit(
                 self.index(row, first_column), self.index(row, last_column),
-                [Qt.DisplayRole, Qt.ForegroundRole, Qt.ToolTipRole],
+                [Qt.DisplayRole, Qt.EditRole, Qt.ForegroundRole, Qt.ToolTipRole],
             )
+
+    def update_rows(self, rows, values):
+        """Update a displayed snapshot and emit targeted model notifications."""
+        if self._df is None or not rows or not values:
+            return False
+        columns = [column for column in values if column in self._df.columns]
+        valid_rows = sorted(set(int(row) for row in rows if 0 <= int(row) < len(self._df)))
+        if not columns or not valid_rows:
+            return False
+        for row in valid_rows:
+            for column in columns:
+                self._df.iat[row, self._df.columns.get_loc(column)] = values[column]
+        self.notify_rows_changed(valid_rows, columns)
+        return True

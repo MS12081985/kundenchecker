@@ -36,4 +36,6 @@ class DashboardData:
     websites_with_opening_hours: int = 0
     websites_with_social_media: int = 0
     websites_not_analyzed: int = 0
+    websites_analyzed: int = 0
+    website_analysis_errors: int = 0
     industry_distribution: dict = field(default_factory=dict)

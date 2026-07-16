@@ -21,6 +21,7 @@ class ProgressDialog(QDialog):
         super().__init__(parent)
 
         self.cancelled = False
+        self.enrichment_mode = False
 
         self.setWindowTitle("Firmen werden geprüft")
         self.setModal(False)
@@ -33,15 +34,15 @@ class ProgressDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Überschrift
-        title = QLabel("Firmen werden recherchiert")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("""
+        self.title_label = QLabel("Firmen werden recherchiert")
+        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setStyleSheet("""
             font-size:20px;
             font-weight:bold;
             padding:8px;
         """)
 
-        layout.addWidget(title)
+        layout.addWidget(self.title_label)
 
         # Aktuelle Firma
 
@@ -76,6 +77,11 @@ class ProgressDialog(QDialog):
         self.status_label.setAlignment(Qt.AlignCenter)
 
         layout.addWidget(self.status_label)
+
+        self.error_label = QLabel("Fehler: 0")
+        self.error_label.setAlignment(Qt.AlignCenter)
+        self.error_label.hide()
+        layout.addWidget(self.error_label)
 
         layout.addStretch()
 
@@ -120,6 +126,15 @@ class ProgressDialog(QDialog):
 
         self.status_label.setText(status)
 
+    def set_enrichment_mode(self):
+        self.enrichment_mode = True
+        self.setWindowTitle("Websites werden analysiert")
+        self.title_label.setText("Websites werden analysiert")
+        self.error_label.show()
+
+    def set_error_count(self, count):
+        self.error_label.setText(f"Fehler: {int(count)}")
+
     # ----------------------------------------
 
     def cancel(self):
@@ -130,7 +145,7 @@ class ProgressDialog(QDialog):
         self.cancelled = True
 
         self.status_label.setText(
-            "Recherche wird beendet ..."
+            "Websiteanalyse wird beendet …" if self.enrichment_mode else "Recherche wird beendet …"
         )
 
         self.cancel_button.setEnabled(False)

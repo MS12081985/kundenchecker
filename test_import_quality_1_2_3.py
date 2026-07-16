@@ -169,8 +169,8 @@ def test_large_quality_scan_is_hash_based(size):
     assert time.monotonic() - started < 20
 
 
-def test_version_is_1_3_0():
-    assert AppConfig.VERSION == "1.3.0"
+def test_version_is_1_3_2():
+    assert AppConfig.VERSION == "1.3.2"
 
 
 @pytest.mark.parametrize(("filename", "engine"), (("kunden.xls", "xlrd"), ("kunden.xlsx", "openpyxl")))

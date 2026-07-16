@@ -25,6 +25,7 @@ class BulkResearchService:
         progress_callback=None,
         force_refresh: bool = False,
         error_callback=None,
+        use_street_matching: bool = True,
     ):
         """
         Führt die Recherche für alle Firmen im DataFrame aus.
@@ -81,10 +82,18 @@ class BulkResearchService:
             try:
                 research = self.research_service.research
                 parameters = signature(research).parameters
-                supports_address = any(item.kind == Parameter.VAR_KEYWORD for item in parameters.values()) or "street" in parameters
+                supports_kwargs = any(item.kind == Parameter.VAR_KEYWORD for item in parameters.values())
+                supports_address = supports_kwargs or "street" in parameters
                 kwargs = {"force_refresh": force_refresh}
                 if supports_address:
-                    kwargs.update(street=street, zipcode=zipcode, country=country, customer_id=customer_id)
+                    kwargs.update(
+                        street=street,
+                        zipcode=zipcode,
+                        country=country,
+                        customer_id=customer_id,
+                    )
+                if supports_kwargs or "use_street_matching" in parameters:
+                    kwargs["use_street_matching"] = use_street_matching
                 result = research(company, city, **kwargs)
             except Exception as exc:
                 if error_callback:

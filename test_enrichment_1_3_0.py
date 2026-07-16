@@ -261,5 +261,5 @@ def test_no_ui_imports_in_service_or_worker_sources():
 
 
 def test_version_and_user_agent():
-    assert AppConfig.VERSION == "1.3.0"
-    assert "KundenChecker/1.3.0" in AppConfig.USER_AGENT
+    assert AppConfig.VERSION == "1.3.2"
+    assert "KundenChecker/1.3.2" in AppConfig.USER_AGENT

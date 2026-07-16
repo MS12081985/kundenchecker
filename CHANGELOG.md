@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.2
+
+- Seitenabhängige Aktionsleiste für Dashboard, Kundenansicht und Berichte.
+- Kompakte Recherche- und Datenqualitätsmenüs mit gemeinsam genutzten Aktionen.
+- Responsives Dashboard mit umbrechenden Statuskarten und Schnellaktionen.
+- Dashboard-Statuskarten öffnen die passende gefilterte Kundenansicht.
+- Nach abgeschlossener Firmenprüfung kann direkt die Websiteanalyse gestartet werden.
+- Erweiterte Impressumsanalyse für Inhaber, Geschäftsführung, Rechtsform, Adresse, Umsatzsteuer-ID und Handelsregister.
+
+## 1.3.1
+
+- Optionaler Straßenabgleich vor „Alle Firmen prüfen“, standardmäßig aktiviert.
+- Auswahl kann in den bestehenden Einstellungen gespeichert werden.
+- Einzel- und Wiederholungsrecherchen verwenden weiterhin verbindlich den Straßenabgleich.
+- Websiteanalyse im Kundendetail vor den CRM-Feldern angeordnet und kompakter dargestellt.
+- Auswahlgestützte Massenanalyse für sichtbare, geladene, markierte, fehlende, alte, schwache oder fehlerhafte Websites ergänzt.
+- Live-Aktualisierung von Tabelle, Kundendetail, Fortschritt und gedrosseltem Dashboard während der Massenanalyse.
+- Kombinierter Kundenstatusfilter für Vollständig und Aktiv.
+
 ## 1.3.0
 
 - Kostenlose, begrenzte Websiteanalyse ausschließlich für bereits zugeordnete offizielle Firmenwebsites.

@@ -1,124 +1,96 @@
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QWidget,
-    QPushButton,
     QHBoxLayout,
-    QVBoxLayout,
-    QFrame,
+    QMenu,
     QSizePolicy,
+    QStackedWidget,
+    QToolButton,
+    QWidget,
 )
 
 
 class Toolbar(QWidget):
-    """
-    Werkzeugleiste des KundenCheckers.
-    """
+    """Compact page-dependent action bar backed by shared QActions."""
 
-    open_requested = Signal()
-    search_requested = Signal()
-    refresh_requested = Signal()
-    bulk_requested = Signal()
-    marked_refresh_requested = Signal()
-    inactive_refresh_requested = Signal()
-    export_requested = Signal()
-    duplicate_requested = Signal()
+    DASHBOARD = 0
+    CUSTOMERS = 1
+    REPORTS = 2
 
-    def __init__(self, parent=None):
+    def __init__(self, actions, parent=None):
         super().__init__(parent)
-
-        self.build_ui()
-
-    def build_ui(self):
-
-        layout = QVBoxLayout(self)
-
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(6)
+        self.actions = actions
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        self.stack = QStackedWidget(self)
+        self.stack.addWidget(QWidget(self))
+        self.stack.addWidget(self._customer_bar())
+        self.stack.addWidget(self._report_bar())
+        layout.addWidget(self.stack)
 
-        self.btn_open = QPushButton("📂 Excel öffnen")
-        self.btn_search = QPushButton("🔍 Firma prüfen")
-        self.btn_refresh = QPushButton("🔄 Erneut prüfen")
-        self.btn_bulk = QPushButton("▶ Alle Firmen prüfen")
-        self.btn_marked_refresh = QPushButton("🔄 Markierte erneut prüfen")
-        self.btn_inactive_refresh = QPushButton("🔄 Nicht aktive erneut prüfen")
-        self.btn_duplicate = QPushButton("🧾 Datenbank-Dubletten")
-        self.btn_export = QPushButton("📤 Export")
+    @staticmethod
+    def _action_button(action):
+        button = QToolButton()
+        button.setDefaultAction(action)
+        button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        button.setMinimumHeight(32)
+        return button
 
-        buttons = (
-            (self.btn_open, "Excel-Datei öffnen"),
-            (self.btn_search, "Ausgewählte Firma prüfen"),
-            (self.btn_refresh, "Ausgewählte Firma erneut prüfen"),
-            (self.btn_bulk, "Alle Firmen prüfen"),
-            (self.btn_marked_refresh, "Markierte Firmen erneut prüfen"),
-            (self.btn_inactive_refresh, "Nicht aktive Firmen erneut prüfen"),
-            (self.btn_duplicate, "Datenbank-Dubletten zusammenführen"),
-            (self.btn_export, "Aktuelle Tabelle exportieren"),
-        )
-        for button, tooltip in buttons:
-            button.setToolTip(tooltip)
-            button.setMinimumHeight(32)
-            button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    @staticmethod
+    def _menu_button(text, actions):
+        button = QToolButton()
+        button.setText(text)
+        button.setPopupMode(QToolButton.InstantPopup)
+        button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        button.setMinimumHeight(32)
+        menu = QMenu(button)
+        menu.addActions(actions)
+        button.setMenu(menu)
+        return button
 
-        def separator():
-            line = QFrame(self)
-            line.setFrameShape(QFrame.VLine)
-            line.setFrameShadow(QFrame.Sunken)
-            line.setFixedWidth(1)
-            return line
+    def _customer_bar(self):
+        bar = QWidget(self)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        self.btn_open = self._action_button(self.actions["open"])
+        self.research_button = self._menu_button("🔍 Recherche ▾", [
+            self.actions["research"],
+            self.actions["research_refresh"],
+            self.actions["bulk"],
+            self.actions["marked_refresh"],
+            self.actions["inactive_refresh"],
+            self.actions["enrichment_all"],
+            self.actions["enrichment_marked"],
+            self.actions["enrichment_missing"],
+        ])
+        self.quality_button = self._menu_button("🧹 Datenqualität ▾", [
+            self.actions["duplicates"],
+            self.actions["import_check"],
+            self.actions["phone_cleanup"],
+            self.actions["enrichment_refresh"],
+            self.actions["import_report"],
+        ])
+        self.btn_export = self._action_button(self.actions["export"])
+        for widget in (self.btn_open, self.research_button, self.quality_button, self.btn_export):
+            layout.addWidget(widget)
+        layout.addStretch()
+        return bar
 
-        row_one = QHBoxLayout()
-        row_one.setSpacing(6)
-        row_one.addWidget(self.btn_open)
-        row_one.addWidget(self.btn_search)
-        row_one.addWidget(self.btn_refresh)
-        row_one.addWidget(self.btn_bulk)
+    def _report_bar(self):
+        bar = QWidget(self)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        for key in ("report_reload", "report_export", "report_detail", "report_company"):
+            layout.addWidget(self._action_button(self.actions[key]))
+        layout.addStretch()
+        return bar
 
-        row_two = QHBoxLayout()
-        row_two.setSpacing(6)
-        row_two.addWidget(self.btn_marked_refresh)
-        row_two.addWidget(self.btn_inactive_refresh)
-        row_two.addWidget(separator())
-        row_two.addWidget(self.btn_duplicate)
-        row_two.addWidget(separator())
-        row_two.addWidget(self.btn_export)
+    def set_context(self, page_index):
+        self.stack.setCurrentIndex(page_index)
+        self.setVisible(page_index != self.DASHBOARD)
 
-        layout.addLayout(row_one)
-        layout.addLayout(row_two)
-
-        self.btn_open.clicked.connect(
-            self.open_requested.emit
-        )
-
-        self.btn_search.clicked.connect(
-            self.search_requested.emit
-        )
-        self.btn_refresh.clicked.connect(self.refresh_requested.emit)
-
-        self.btn_bulk.clicked.connect(
-            self.bulk_requested.emit
-        )
-        self.btn_marked_refresh.clicked.connect(self.marked_refresh_requested.emit)
-        self.btn_inactive_refresh.clicked.connect(self.inactive_refresh_requested.emit)
-
-        self.btn_duplicate.clicked.connect(
-            self.duplicate_requested.emit
-        )
-
-        self.btn_export.clicked.connect(
-            self.export_requested.emit
-        )
-
-    def set_enabled(self, enabled: bool):
-        """
-        Aktiviert oder deaktiviert alle Buttons.
-        """
-
-        self.btn_open.setEnabled(enabled)
-        self.btn_search.setEnabled(enabled)
-        self.btn_refresh.setEnabled(enabled)
-        self.btn_bulk.setEnabled(enabled)
-        self.btn_marked_refresh.setEnabled(enabled)
-        self.btn_inactive_refresh.setEnabled(enabled)
-        self.btn_duplicate.setEnabled(enabled)
-        self.btn_export.setEnabled(enabled)
+    def set_enabled(self, enabled):
+        for action in self.actions.values():
+            action.setEnabled(bool(enabled))

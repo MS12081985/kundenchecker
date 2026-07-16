@@ -104,14 +104,25 @@ class EnrichmentService:
             pages = self._crawl(website)
             result = self._build_result(company, city, website, key, customer_id, pages, analyzed_at)
         except Exception as error:
-            message = self._friendly_error(error)
-            logger.warning("Websiteanalyse fehlgeschlagen: Firma={} Grund={}", company, message)
-            result = EnrichmentResult(
-                company=company, city=city, website=website, customer_id=customer_id,
-                company_key=key, analyzed_at=analyzed_at,
-                analysis_version=AppConfig.ENRICHMENT_ANALYSIS_VERSION,
-                enrichment_status="Fehler", enrichment_error=message,
-            )
+            return self.failure_result(company, city, website, customer_id, error, analyzed_at)
+        self.database.save_enrichment(result)
+        return result
+
+    def failure_result(self, company, city, website, customer_id, error, analyzed_at=None):
+        """Create and persist the common per-customer failure result."""
+        message = self._friendly_error(error)
+        logger.warning("Websiteanalyse fehlgeschlagen: Firma={} Grund={}", company, message)
+        result = EnrichmentResult(
+            company=company,
+            city=city,
+            website=WebsiteFinder.clean_url(website),
+            customer_id=customer_id,
+            company_key=company_key(company, city),
+            analyzed_at=analyzed_at or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            analysis_version=AppConfig.ENRICHMENT_ANALYSIS_VERSION,
+            enrichment_status="Fehler",
+            enrichment_error=message,
+        )
         self.database.save_enrichment(result)
         return result
 
@@ -124,16 +135,24 @@ class EnrichmentService:
         result = EnrichmentResult.from_dict(payload)
         if WebsiteFinder.clean_url(result.website) != website:
             return None
-        try:
-            analyzed = datetime.fromisoformat(result.analyzed_at.replace("Z", "+00:00"))
-            if analyzed.tzinfo is None:
-                analyzed = analyzed.replace(tzinfo=timezone.utc)
-            if analyzed < datetime.now(timezone.utc) - timedelta(days=AppConfig.ENRICHMENT_MAX_AGE_DAYS):
-                return None
-        except (TypeError, ValueError):
+        if not self.is_analysis_current(result.analyzed_at):
+            return None
+        if result.analysis_version != AppConfig.ENRICHMENT_ANALYSIS_VERSION:
             return None
         data = result.to_dict(); data["from_cache"] = True
         return EnrichmentResult.from_dict(data)
+
+    @staticmethod
+    def is_analysis_current(analyzed_at, max_age_days=None):
+        """Use the central enrichment age rule for cache and bulk selection."""
+        try:
+            analyzed = datetime.fromisoformat(str(analyzed_at).replace("Z", "+00:00"))
+            if analyzed.tzinfo is None:
+                analyzed = analyzed.replace(tzinfo=timezone.utc)
+            age_days = AppConfig.ENRICHMENT_MAX_AGE_DAYS if max_age_days is None else int(max_age_days)
+            return analyzed >= datetime.now(timezone.utc) - timedelta(days=age_days)
+        except (TypeError, ValueError):
+            return False
 
     def _crawl(self, website):
         home = self._fetch(website)
@@ -252,11 +271,23 @@ class EnrichmentService:
             "valid_website": bool(home["title"] or home["visible_text"]),
         }
         score = self.calculate_score(facts)
+        from models.imprint_data import ImprintData
+        from services.imprint_extractor import ImprintExtractor
+        imprint_page = next((page for page in pages if page.url == imprint), None)
+        imprint_data = (
+            ImprintExtractor.extract(imprint_page.html, imprint, company)
+            if imprint_page is not None else ImprintData()
+        )
+        logger.info(
+            "Impressumsanalyse abgeschlossen: Rollen={} Register={} Konfidenz={:.2f}",
+            len(imprint_data.owner_names) + len(imprint_data.managing_director_names) + len(imprint_data.representative_names),
+            bool(imprint_data.commercial_register_number), imprint_data.imprint_extraction_confidence,
+        )
         return EnrichmentResult(
             company=company, city=city, website=pages[0].url, customer_id=customer_id,
             company_key=key, website_score=score.total, website_score_category=score.category,
             website_score_details=score, has_https=facts["https"], ssl_valid=facts["ssl"],
-            has_imprint=bool(imprint), imprint_url=imprint,
+            has_imprint=bool(imprint), imprint_url=imprint, imprint_data=imprint_data,
             has_privacy_policy=bool(privacy), privacy_url=privacy,
             has_contact_page=bool(contact), contact_page_url=contact,
             has_opening_hours=opening.reliable, opening_hours=opening, social_media=socials,

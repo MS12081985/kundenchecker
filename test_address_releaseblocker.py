@@ -111,6 +111,25 @@ def test_missing_or_conflicting_source_address_never_activates_result():
         assert result.status == "Nicht gefunden"
 
 
+def test_optional_street_matching_controls_candidate_acceptance():
+    contacts = {
+        "https://candidate.test/": {
+            "phone": "+49 30 123456",
+            "email": "info@candidate.test",
+            "addresses": [{"street": "Andere Straße 1", "city": "Berlin"}],
+        }
+    }
+    strict = service_with_candidates(["https://candidate.test"], contacts).research(
+        "Firma", "Berlin", street="Hauptstraße 10", use_street_matching=True
+    )
+    relaxed = service_with_candidates(["https://candidate.test"], contacts).research(
+        "Firma", "Berlin", street="Hauptstraße 10", use_street_matching=False
+    )
+    assert strict.website == ""
+    assert relaxed.website == "https://candidate.test/"
+    assert relaxed.email == "info@candidate.test"
+
+
 def test_bulk_forwards_clean_address_and_stable_id():
     captured = {}
     bulk = BulkResearchService()
@@ -125,4 +144,28 @@ def test_bulk_forwards_clean_address_and_stable_id():
         "ID": 7, "KUNDENNAME": "Restaurant", "CITY": "Berlin", "STRASSE": "Hauptstr. 10",
         "ZIPCODE": float("nan"), "LAND": "DE",
     }]))
-    assert captured == {"force_refresh": False, "street": "Hauptstr. 10", "zipcode": "", "country": "DE", "customer_id": 7}
+    assert captured == {
+        "force_refresh": False,
+        "street": "Hauptstr. 10",
+        "zipcode": "",
+        "country": "DE",
+        "customer_id": 7,
+        "use_street_matching": True,
+    }
+
+
+def test_bulk_forwards_disabled_street_matching():
+    captured = {}
+    bulk = BulkResearchService()
+
+    class FakeService:
+        def research(self, company, city, **kwargs):
+            captured.update(kwargs)
+            return type("Result", (), {"company": company, "city": city, "status": "Nicht gefunden"})()
+
+    bulk.research_service = FakeService()
+    bulk.research_dataframe(
+        pd.DataFrame([{"KUNDENNAME": "Firma", "CITY": "Berlin", "STRASSE": "Hauptstraße 10"}]),
+        use_street_matching=False,
+    )
+    assert captured["use_street_matching"] is False

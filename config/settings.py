@@ -25,6 +25,8 @@ class Settings:
         "research": {
             "timeout": 15,
             "auto_save_sqlite": True,
+            "use_street_matching": True,
+            "offer_enrichment_after_research": True,
         },
         "export": {
             "directory": str(AppConfig.EXPORT_DIR),
