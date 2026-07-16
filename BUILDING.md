@@ -8,7 +8,7 @@ chmod +x scripts/build_macos.sh
 scripts/build_macos.sh
 ```
 
-Ergebnis: `dist/KundenChecker.app` und `release/KundenChecker-1.0.0.dmg`.
+Ergebnis: `dist/KundenChecker.app` und `release/KundenChecker-1.3.0.dmg`.
 Die DMG enthält die App und eine Verknüpfung zu `/Applications`.
 
 Die App ist zunächst nicht signiert. macOS kann beim ersten Start warnen; dann

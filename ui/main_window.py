@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QLineEdit,
     QComboBox,
+    QSpinBox,
     QDialog,
     QLabel,
     QMainWindow,
@@ -83,6 +84,17 @@ class MainWindow(QMainWindow):
     report_page_export_requested = Signal()
     report_detail_requested = Signal(object)
     report_company_requested = Signal(object)
+    enrichment_options_requested = Signal()
+    enrichment_options_selected = Signal(object)
+    enrichment_confirmed = Signal(object, bool)
+    enrichment_selected_requested = Signal(bool)
+    enrichment_marked_requested = Signal()
+    enrichment_missing_requested = Signal()
+    enrichment_details_requested = Signal()
+    enrichment_url_requested = Signal(str)
+    enrichment_filter_changed = Signal(object)
+    weak_websites_requested = Signal()
+    missing_imprint_requested = Signal()
     crm_filter_changed = Signal(object)
     follow_ups_requested = Signal()
     crm_save_requested = Signal(object)
@@ -101,6 +113,9 @@ class MainWindow(QMainWindow):
     update_release_requested = Signal(str)
     update_download_requested = Signal(object)
     update_skip_requested = Signal(str)
+    import_report_save_requested = Signal(object)
+    import_cleaned_file_requested = Signal(str)
+    import_customers_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -141,6 +156,15 @@ class MainWindow(QMainWindow):
         filter_bar.addWidget(QLabel("Status:")); filter_bar.addWidget(self.stage_filter)
         filter_bar.addWidget(QLabel("Priorität:")); filter_bar.addWidget(self.priority_filter)
         filter_bar.addWidget(self.tag_filter, 1)
+        self.website_score_filter = QComboBox(self)
+        self.website_score_filter.addItems(["Alle Website-Scores", "Sehr gut", "Gut", "Ausbaufähig", "Schwach", "Nicht analysiert"])
+        self.industry_filter = QLineEdit(self); self.industry_filter.setPlaceholderText("Branche filtern …")
+        self.social_filter = QComboBox(self); self.social_filter.addItems(["Social Media: Alle", "Mit Social Media", "Ohne Social Media"])
+        self.hours_filter = QComboBox(self); self.hours_filter.addItems(["Öffnungszeiten: Alle", "Mit Öffnungszeiten", "Ohne Öffnungszeiten"])
+        self.analysis_age_filter = QSpinBox(self); self.analysis_age_filter.setRange(0, 3650); self.analysis_age_filter.setSpecialValueText("Analysealter: Alle"); self.analysis_age_filter.setSuffix(" Tage")
+        enrichment_filter_bar = QHBoxLayout()
+        enrichment_filter_bar.addWidget(self.website_score_filter); enrichment_filter_bar.addWidget(self.industry_filter, 1)
+        enrichment_filter_bar.addWidget(self.social_filter); enrichment_filter_bar.addWidget(self.hours_filter); enrichment_filter_bar.addWidget(self.analysis_age_filter)
 
         table_container = QWidget(self)
         table_layout = QVBoxLayout(table_container)
@@ -148,6 +172,7 @@ class MainWindow(QMainWindow):
         table_layout.setSpacing(8)
         table_layout.addWidget(self.search_field)
         table_layout.addLayout(filter_bar)
+        table_layout.addLayout(enrichment_filter_bar)
         table_layout.addWidget(self.customer_table, 1)
 
         self.detail_scroll_area = QScrollArea(self)
@@ -230,6 +255,9 @@ class MainWindow(QMainWindow):
         self.dashboard.report_requested.connect(self.report_requested)
         self.dashboard.export_requested.connect(self.export_requested)
         self.dashboard.follow_ups_requested.connect(self.follow_ups_requested)
+        self.dashboard.enrichment_missing_requested.connect(self.enrichment_missing_requested)
+        self.dashboard.weak_websites_requested.connect(self.weak_websites_requested)
+        self.dashboard.missing_imprint_requested.connect(self.missing_imprint_requested)
         self.reports_page.filter_changed.connect(self.report_filter_changed)
         self.reports_page.reload_requested.connect(self.report_reload_requested)
         self.reports_page.export_requested.connect(self.report_page_export_requested)
@@ -250,6 +278,9 @@ class MainWindow(QMainWindow):
         self.main_menu.marked_refresh_requested.connect(self.marked_refresh_requested)
         self.main_menu.inactive_refresh_requested.connect(self.inactive_refresh_requested)
         self.main_menu.report_requested.connect(self.report_requested)
+        self.main_menu.enrichment_requested.connect(self.enrichment_options_requested)
+        self.main_menu.enrichment_marked_requested.connect(self.enrichment_marked_requested)
+        self.main_menu.enrichment_missing_requested.connect(self.enrichment_missing_requested)
         self.main_menu.log_directory_requested.connect(self.log_directory_requested)
         self.main_menu.user_data_directory_requested.connect(self.user_data_directory_requested)
         self.main_menu.system_information_requested.connect(self.system_information_requested)
@@ -269,6 +300,11 @@ class MainWindow(QMainWindow):
         self.stage_filter.currentTextChanged.connect(self._emit_crm_filter)
         self.priority_filter.currentTextChanged.connect(self._emit_crm_filter)
         self.tag_filter.textChanged.connect(self._emit_crm_filter)
+        self.website_score_filter.currentTextChanged.connect(self._emit_enrichment_filter)
+        self.industry_filter.textChanged.connect(self._emit_enrichment_filter)
+        self.social_filter.currentTextChanged.connect(self._emit_enrichment_filter)
+        self.hours_filter.currentTextChanged.connect(self._emit_enrichment_filter)
+        self.analysis_age_filter.valueChanged.connect(self._emit_enrichment_filter)
 
         self.customer_table.selectionModel().currentRowChanged.connect(
             self._emit_selected_customer
@@ -284,6 +320,9 @@ class MainWindow(QMainWindow):
         self.detail_panel.crm_history_requested.connect(self.crm_history_requested)
         self.detail_panel.maps_requested.connect(self.maps_requested)
         self.detail_panel.follow_up_done_requested.connect(self.follow_up_done_requested)
+        self.detail_panel.enrichment_requested.connect(self.enrichment_selected_requested)
+        self.detail_panel.enrichment_details_requested.connect(self.enrichment_details_requested)
+        self.detail_panel.enrichment_url_requested.connect(self.enrichment_url_requested)
 
     def confirm_phone_cleanup(self, items):
         from widgets.phone_cleanup_dialog import PhoneCleanupDialog
@@ -334,6 +373,15 @@ class MainWindow(QMainWindow):
             "stage": self.stage_filter.currentText(),
             "priority": self.priority_filter.currentText(),
             "tag": self.tag_filter.text().strip(),
+        })
+
+    def _emit_enrichment_filter(self):
+        self.enrichment_filter_changed.emit({
+            "score": self.website_score_filter.currentText(),
+            "industry": self.industry_filter.text().strip(),
+            "social": self.social_filter.currentText(),
+            "hours": self.hours_filter.currentText(),
+            "age_days": self.analysis_age_filter.value(),
         })
 
     @Slot(object)
@@ -435,6 +483,21 @@ class MainWindow(QMainWindow):
 
         AboutDialog(information, self).exec()
 
+    def review_import_quality(self, analysis):
+        from widgets.import_quality_dialog import ImportQualityDialog
+
+        dialog = ImportQualityDialog(analysis, self)
+        return dialog.decision if dialog.exec() == QDialog.Accepted else None
+
+    def show_import_report(self, report, cleaned_path=""):
+        from widgets.import_report_dialog import ImportReportDialog
+
+        dialog = ImportReportDialog(report, cleaned_path, self)
+        dialog.save_requested.connect(self.import_report_save_requested)
+        dialog.cleaned_file_requested.connect(self.import_cleaned_file_requested)
+        dialog.customers_requested.connect(self.import_customers_requested)
+        dialog.exec()
+
     @Slot(object)
     def show_update_dialog(self, information):
         from widgets.update_dialog import UpdateDialog
@@ -512,6 +575,10 @@ class MainWindow(QMainWindow):
         del blocker
         self._emit_selected_customer(index, QModelIndex())
         self._emit_selected_customers()
+
+    @Slot(object, object)
+    def update_customer_rows(self, rows, columns):
+        self.table_model.notify_rows_changed(rows, columns)
 
     @Slot(object, object)
     def _emit_selected_customers(self, _selected=None, _deselected=None):
@@ -621,6 +688,29 @@ class MainWindow(QMainWindow):
         self.progress_dialog.close()
         self.progress_dialog.deleteLater()
         self.progress_dialog = None
+
+    @Slot()
+    def show_enrichment_options(self):
+        from widgets.enrichment_options_dialog import EnrichmentOptionsDialog
+        dialog = EnrichmentOptionsDialog(self)
+        dialog.accepted_options.connect(self.enrichment_options_selected)
+        dialog.exec()
+
+    @Slot(object, bool, str)
+    def show_enrichment_confirmation(self, customers, force_refresh, duration):
+        answer = QMessageBox.question(
+            self, "Websiteanalyse starten",
+            f"{len(customers)} Websites werden analysiert.\nGeschätzte Dauer: {duration}.\n\n"
+            + ("Vorhandene Analysen werden ignoriert." if force_refresh else "Aktuelle Analysen können aus dem Cache verwendet werden."),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self.enrichment_confirmed.emit(customers, force_refresh)
+
+    @Slot(object)
+    def show_enrichment_detail(self, result):
+        from widgets.enrichment_detail_dialog import EnrichmentDetailDialog
+        EnrichmentDetailDialog(result, self).exec()
 
     @Slot()
     def show_research_filter_dialog(self):

@@ -11,6 +11,10 @@ class DashboardData:
     missing_website: int = 0
     missing_phone: int = 0
     missing_email: int = 0
+    invalid_phone: int = 0
+    invalid_email: int = 0
+    detected_duplicates: int = 0
+    quality_score: int = 0
     visible_rows: int = 0
     last_research_at: str = ""
     last_research_processed: int | None = None
@@ -24,3 +28,12 @@ class DashboardData:
     customers: int = 0
     high_priority: int = 0
     today_activities: int = 0
+    average_website_score: float = 0.0
+    very_good_websites: int = 0
+    weak_websites: int = 0
+    websites_without_imprint: int = 0
+    websites_without_privacy: int = 0
+    websites_with_opening_hours: int = 0
+    websites_with_social_media: int = 0
+    websites_not_analyzed: int = 0
+    industry_distribution: dict = field(default_factory=dict)

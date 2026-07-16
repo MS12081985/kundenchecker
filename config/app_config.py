@@ -13,7 +13,7 @@ class AppConfig:
     # --------------------------------------------------
 
     APP_NAME = "KundenChecker"
-    VERSION = "1.2.2"
+    VERSION = "1.3.0"
 
     WINDOW_WIDTH = 1500
     WINDOW_HEIGHT = 900
@@ -62,14 +62,27 @@ class AppConfig:
         "about",
     )
     RESEARCH_SECONDS_PER_COMPANY = 5
+    ENRICHMENT_MAX_PAGES = 6
+    ENRICHMENT_MAX_AGE_DAYS = 30
+    ENRICHMENT_RATE_LIMIT_SECONDS = 0.2
+    ENRICHMENT_DESCRIPTION_MAX_LENGTH = 320
+    ENRICHMENT_ANALYSIS_VERSION = "1.0"
+    ENRICHMENT_SCORE_WEIGHTS = {
+        "https": 10,
+        "ssl": 5,
+        "imprint": 15,
+        "privacy": 10,
+        "contact_page": 10,
+        "phone": 10,
+        "email": 10,
+        "opening_hours": 10,
+        "social_media": 5,
+        "structured_data": 5,
+        "meta_description": 5,
+        "valid_website": 5,
+    }
 
-    USER_AGENT = (
-        "Mozilla/5.0 "
-        "(Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/131.0 Safari/537.36"
-    )
+    USER_AGENT = f"KundenChecker/{VERSION} (+{GITHUB_REPOSITORY_URL if 'GITHUB_REPOSITORY_URL' in locals() else 'https://github.com/MS12081985/kundenchecker'})"
 
     # --------------------------------------------------
     # Suche

@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.0
+
+- Kostenlose, begrenzte Websiteanalyse ausschließlich für bereits zugeordnete offizielle Firmenwebsites.
+- Transparenter Website-Score mit zentraler Gewichtung und vollständiger Kriterienaufschlüsselung.
+- Erkennung von HTTPS/TLS, Impressum, Datenschutz, Kontaktseite und Kontaktformular.
+- Lokale Erkennung von Social-Media-Profilen und strukturierten beziehungsweise sichtbaren Öffnungszeiten.
+- Regelbasierte Branchenklassifikation mit Konfidenz und nachvollziehbaren Hinweisen.
+- Lokale Kurzbeschreibung aus belegbaren Websiteinhalten ohne Cloud-KI.
+- Cache, Force Refresh, Massenanalyse, Abbruch und automatische Veraltung bei Websiteänderung.
+- Websiteanalyse im Kundendetail, Dashboard und optional im Kundenexport.
+
+## 1.2.3
+
+- Importprüfung mit Kennzahlen zu Pflichtwerten, Kontaktdaten, Websites und leeren Zeilen.
+- Sichere Excel-Dublettenbereinigung vor der Übernahme in die Kundenansicht.
+- Bereinigte XLSX-Datei mit separatem Importbericht und Schutz der Originaldatei.
+- Transparenter Datenqualitäts-Score und Qualitätskennzahlen im Dashboard.
+
 ## 1.2.2
 
 - Automatische Updateprüfung nach dem sichtbaren Programmstart ergänzt.

@@ -1,4 +1,5 @@
 import sqlite3
+import json
 from datetime import datetime
 from pathlib import Path
 from config.app_config import AppConfig
@@ -69,6 +70,10 @@ class Database:
             for column, definition in crm_columns.items():
                 if column not in existing:
                     cursor.execute(f"ALTER TABLE companies ADD COLUMN {column} {definition}")
+            existing = {row[1] for row in cursor.execute("PRAGMA table_info(companies)")}
+            for column in ("street", "zipcode", "country"):
+                if column not in existing:
+                    cursor.execute(f"ALTER TABLE companies ADD COLUMN {column} TEXT DEFAULT ''")
 
             now = datetime.now().isoformat(timespec="seconds")
             cursor.execute(
@@ -106,6 +111,44 @@ class Database:
                          AND companies.city = crm_activities.city
                    ) WHERE company_id IS NULL"""
             )
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS company_enrichment (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+                    company_key TEXT NOT NULL UNIQUE,
+                    website TEXT NOT NULL DEFAULT '',
+                    result_json TEXT NOT NULL,
+                    website_score INTEGER NOT NULL DEFAULT 0,
+                    industry TEXT NOT NULL DEFAULT '',
+                    has_imprint INTEGER NOT NULL DEFAULT 0,
+                    has_privacy_policy INTEGER NOT NULL DEFAULT 0,
+                    has_opening_hours INTEGER NOT NULL DEFAULT 0,
+                    has_social_media INTEGER NOT NULL DEFAULT 0,
+                    analyzed_at TEXT NOT NULL DEFAULT '',
+                    analysis_version TEXT NOT NULL DEFAULT '',
+                    enrichment_status TEXT NOT NULL DEFAULT '',
+                    enrichment_error TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                )
+            """)
+            enrichment_columns = {row[1] for row in cursor.execute("PRAGMA table_info(company_enrichment)")}
+            enrichment_definitions = {
+                "company_id": "INTEGER REFERENCES companies(id) ON DELETE SET NULL",
+                "company_key": "TEXT NOT NULL DEFAULT ''",
+                "website": "TEXT NOT NULL DEFAULT ''", "result_json": "TEXT NOT NULL DEFAULT '{}'",
+                "website_score": "INTEGER NOT NULL DEFAULT 0", "industry": "TEXT NOT NULL DEFAULT ''",
+                "has_imprint": "INTEGER NOT NULL DEFAULT 0", "has_privacy_policy": "INTEGER NOT NULL DEFAULT 0",
+                "has_opening_hours": "INTEGER NOT NULL DEFAULT 0", "has_social_media": "INTEGER NOT NULL DEFAULT 0",
+                "analyzed_at": "TEXT NOT NULL DEFAULT ''", "analysis_version": "TEXT NOT NULL DEFAULT ''",
+                "enrichment_status": "TEXT NOT NULL DEFAULT ''", "enrichment_error": "TEXT NOT NULL DEFAULT ''",
+                "updated_at": "TEXT NOT NULL DEFAULT ''",
+            }
+            for column, definition in enrichment_definitions.items():
+                if column not in enrichment_columns:
+                    cursor.execute(f"ALTER TABLE company_enrichment ADD COLUMN {column} {definition}")
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_company_enrichment_key ON company_enrichment(company_key)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_company_enrichment_company_id ON company_enrichment(company_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_company_enrichment_analyzed_at ON company_enrichment(analyzed_at)")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -124,7 +167,10 @@ class Database:
         owner="",
         status="",
         source="",
-        last_check=""
+        last_check="",
+        street="",
+        zipcode="",
+        country="",
     ):
         now = datetime.now().isoformat(timespec="seconds")
         conn = self.connect()
@@ -145,11 +191,14 @@ class Database:
                 source,
                 last_check,
                 created_at,
-                updated_at
+                updated_at,
+                street,
+                zipcode,
+                country
 
             )
 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
             ON CONFLICT(company_name, city)
 
@@ -162,6 +211,9 @@ class Database:
                 status=excluded.status,
                 source=excluded.source,
                 last_check=excluded.last_check,
+                street=excluded.street,
+                zipcode=excluded.zipcode,
+                country=excluded.country,
                 updated_at=excluded.updated_at
 
         """, (
@@ -179,7 +231,10 @@ class Database:
 
             last_check,
             now,
-            now
+            now,
+            street,
+            zipcode,
+            country
 
         ))
 
@@ -212,6 +267,17 @@ class Database:
         conn.close()
 
         return row
+
+    def get_company_address(self, company_name, city=""):
+        conn = self.connect()
+        try:
+            row = conn.execute(
+                "SELECT street, zipcode, country FROM companies WHERE company_name = ? AND city = ?",
+                (company_name, city),
+            ).fetchone()
+            return row or ("", "", "")
+        finally:
+            conn.close()
 
     def get_all(self):
 
@@ -249,3 +315,87 @@ class Database:
 
         conn.commit()
         conn.close()
+
+    def save_enrichment(self, result):
+        payload = result.to_dict()
+        social = payload.get("social_media", {})
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN")
+            conn.execute("""
+                INSERT INTO company_enrichment (
+                    company_id, company_key, website, result_json, website_score, industry,
+                    has_imprint, has_privacy_policy, has_opening_hours, has_social_media,
+                    analyzed_at, analysis_version, enrichment_status, enrichment_error, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(company_key) DO UPDATE SET
+                    company_id=excluded.company_id, website=excluded.website,
+                    result_json=excluded.result_json, website_score=excluded.website_score,
+                    industry=excluded.industry, has_imprint=excluded.has_imprint,
+                    has_privacy_policy=excluded.has_privacy_policy,
+                    has_opening_hours=excluded.has_opening_hours,
+                    has_social_media=excluded.has_social_media, analyzed_at=excluded.analyzed_at,
+                    analysis_version=excluded.analysis_version,
+                    enrichment_status=excluded.enrichment_status,
+                    enrichment_error=excluded.enrichment_error, updated_at=excluded.updated_at
+            """, (
+                result.customer_id, result.company_key, result.website,
+                json.dumps(payload, ensure_ascii=False), result.website_score, result.industry.industry,
+                int(result.has_imprint), int(result.has_privacy_policy), int(result.has_opening_hours),
+                int(any(social.values())), result.analyzed_at, result.analysis_version,
+                result.enrichment_status, result.enrichment_error,
+                datetime.now().isoformat(timespec="seconds"),
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            logger.exception("Websiteanalyse konnte nicht gespeichert werden")
+            raise
+        finally:
+            conn.close()
+
+    def get_enrichment(self, company_key):
+        conn = self.connect()
+        try:
+            row = conn.execute(
+                "SELECT result_json FROM company_enrichment WHERE company_key = ?", (company_key,)
+            ).fetchone()
+            return json.loads(row[0]) if row else None
+        finally:
+            conn.close()
+
+    def get_enrichment_summary(self):
+        conn = self.connect()
+        try:
+            return conn.execute("""
+                SELECT COUNT(*), COALESCE(AVG(website_score), 0),
+                       SUM(website_score >= 80), SUM(website_score < 40),
+                       SUM(has_imprint = 0), SUM(has_privacy_policy = 0),
+                       SUM(has_opening_hours = 1), SUM(has_social_media = 1)
+                FROM company_enrichment WHERE enrichment_status = 'Erfolgreich'
+            """).fetchone()
+        finally:
+            conn.close()
+
+    def get_all_enrichments(self):
+        conn = self.connect()
+        try:
+            rows = conn.execute("SELECT company_key, website, result_json FROM company_enrichment").fetchall()
+            return [(key, website, json.loads(payload)) for key, website, payload in rows]
+        finally:
+            conn.close()
+
+    def mark_enrichment_stale(self, company_key):
+        conn = self.connect()
+        try:
+            row = conn.execute("SELECT result_json FROM company_enrichment WHERE company_key = ?", (company_key,)).fetchone()
+            payload = json.loads(row[0]) if row else None
+            if payload is not None:
+                payload["enrichment_status"] = "Veraltet"
+                conn.execute(
+                    "UPDATE company_enrichment SET result_json = ?, enrichment_status = 'Veraltet', updated_at = ? WHERE company_key = ?",
+                    (json.dumps(payload, ensure_ascii=False), datetime.now().isoformat(timespec="seconds"), company_key),
+                )
+            conn.commit()
+        finally:
+            conn.close()

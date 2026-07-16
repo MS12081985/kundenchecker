@@ -22,6 +22,9 @@ class MainMenu(QObject):
     marked_refresh_requested = Signal()
     inactive_refresh_requested = Signal()
     report_requested = Signal()
+    enrichment_requested = Signal()
+    enrichment_marked_requested = Signal()
+    enrichment_missing_requested = Signal()
 
     about_requested = Signal()
     log_directory_requested = Signal()
@@ -77,7 +80,7 @@ class MainMenu(QObject):
         extras_menu = menubar.addMenu("&Extras")
 
         duplicate_action = QAction(
-            "Dubletten finden",
+            "Datenbank-Dubletten zusammenführen",
             self
         )
 
@@ -138,6 +141,16 @@ class MainMenu(QObject):
         report_action = QAction("Letzten Recherchebericht anzeigen", self)
         report_action.triggered.connect(self.report_requested.emit)
         research_menu.addAction(report_action)
+        research_menu.addSeparator()
+        enrichment_action = QAction("Websites analysieren...", self)
+        enrichment_action.triggered.connect(self.enrichment_requested.emit)
+        research_menu.addAction(enrichment_action)
+        marked_enrichment_action = QAction("Markierte Websites analysieren", self)
+        marked_enrichment_action.triggered.connect(self.enrichment_marked_requested.emit)
+        research_menu.addAction(marked_enrichment_action)
+        missing_enrichment_action = QAction("Nicht analysierte Websites analysieren", self)
+        missing_enrichment_action.triggered.connect(self.enrichment_missing_requested.emit)
+        research_menu.addAction(missing_enrichment_action)
 
         settings_menu = menubar.addMenu("&Einstellungen")
         settings_action = QAction("Einstellungen...", self)

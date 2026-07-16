@@ -10,6 +10,9 @@ class Dashboard(QWidget):
     report_requested = Signal()
     export_requested = Signal()
     follow_ups_requested = Signal()
+    enrichment_missing_requested = Signal()
+    weak_websites_requested = Signal()
+    missing_imprint_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,10 +42,16 @@ class Dashboard(QWidget):
         self.crm_details = QLabel()
         self.crm_details.setWordWrap(True)
         layout.addWidget(self.crm_details)
+        self.quality_details = QLabel()
+        self.quality_details.setWordWrap(True)
+        layout.addWidget(self.quality_details)
+        self.enrichment_details = QLabel(); self.enrichment_details.setWordWrap(True); layout.addWidget(self.enrichment_details)
         actions = QHBoxLayout()
         for text, signal in [("Excel öffnen", self.open_excel_requested), ("Zur Kundenliste", self.customers_requested),
                              ("Alle Firmen prüfen", self.bulk_check_requested), ("Nicht aktive erneut prüfen", self.inactive_refresh_requested),
-                             ("Offene Wiedervorlagen", self.follow_ups_requested), ("Letzten Bericht", self.report_requested), ("Export", self.export_requested)]:
+                             ("Offene Wiedervorlagen", self.follow_ups_requested), ("Nicht analysierte Websites", self.enrichment_missing_requested),
+                             ("Schwache Websites", self.weak_websites_requested), ("Ohne Impressum", self.missing_imprint_requested),
+                             ("Letzten Bericht", self.report_requested), ("Export", self.export_requested)]:
             button = QPushButton(text); button.setMinimumHeight(34); button.clicked.connect(signal); actions.addWidget(button)
         layout.addLayout(actions); layout.addStretch()
         scroll = QScrollArea(self); scroll.setWidgetResizable(True); scroll.setWidget(content)
@@ -68,4 +77,18 @@ class Dashboard(QWidget):
             f"Interessenten: {getattr(data, 'prospects', 0)} | Kunden: {getattr(data, 'customers', 0)} | "
             f"Hohe Priorität: {getattr(data, 'high_priority', 0)} | "
             f"Heutige Aktivitäten: {getattr(data, 'today_activities', 0)}"
+        )
+        self.quality_details.setText(
+            f"Datenqualität: {getattr(data, 'quality_score', 0)}% | "
+            f"Ungültige Telefonnummern: {getattr(data, 'invalid_phone', 0)} | "
+            f"Ungültige E-Mails: {getattr(data, 'invalid_email', 0)} | "
+            f"Erkannte Dubletten: {getattr(data, 'detected_duplicates', 0)}"
+        )
+        industries = ", ".join(f"{name}: {count}" for name, count in getattr(data, "industry_distribution", {}).items()) or "–"
+        self.enrichment_details.setText(
+            f"Websiteanalyse: Ø {getattr(data, 'average_website_score', 0):.1f}/100 | Sehr gut: {getattr(data, 'very_good_websites', 0)} | "
+            f"Schwach: {getattr(data, 'weak_websites', 0)} | Ohne Impressum: {getattr(data, 'websites_without_imprint', 0)} | "
+            f"Ohne Datenschutz: {getattr(data, 'websites_without_privacy', 0)} | Mit Öffnungszeiten: {getattr(data, 'websites_with_opening_hours', 0)} | "
+            f"Mit Social Media: {getattr(data, 'websites_with_social_media', 0)} | Noch nicht analysiert: {getattr(data, 'websites_not_analyzed', 0)}\n"
+            f"Branchen: {industries}"
         )

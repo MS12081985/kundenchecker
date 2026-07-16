@@ -1,4 +1,6 @@
 from services.research_service import ResearchService
+from models.address_utils import COUNTRY_COLUMNS, POSTAL_CODE_COLUMNS, STREET_COLUMNS, first_value
+from inspect import Parameter, signature
 
 
 class BulkResearchService:
@@ -56,6 +58,12 @@ class BulkResearchService:
             city = str(
                 row.get("CITY", "")
             ).strip()
+            values = row.to_dict()
+            street = first_value(values, STREET_COLUMNS)
+            zipcode = first_value(values, POSTAL_CODE_COLUMNS)
+            country = first_value(values, COUNTRY_COLUMNS)
+            customer_id = next((values.get(name) for name in ("id", "ID", "KUNDEN_ID", "CUSTOMER_ID")
+                                if name in values), None)
 
             if progress_callback:
 
@@ -71,11 +79,13 @@ class BulkResearchService:
                 )
 
             try:
-                result = self.research_service.research(
-                    company,
-                    city,
-                    force_refresh=force_refresh,
-                )
+                research = self.research_service.research
+                parameters = signature(research).parameters
+                supports_address = any(item.kind == Parameter.VAR_KEYWORD for item in parameters.values()) or "street" in parameters
+                kwargs = {"force_refresh": force_refresh}
+                if supports_address:
+                    kwargs.update(street=street, zipcode=zipcode, country=country, customer_id=customer_id)
+                result = research(company, city, **kwargs)
             except Exception as exc:
                 if error_callback:
                     error_callback(current, total, company, city, str(exc))

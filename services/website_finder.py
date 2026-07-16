@@ -142,15 +142,17 @@ class WebsiteFinder:
         return score
 
     def find_website(self, company_name: str, city: str = "") -> str:
-
-        candidates = self.search(company_name, city)
+        candidates = self.ranked_candidates(company_name, city)
 
         if not candidates:
             return ""
 
+        return self.clean_url(candidates[0]["url"])
+
+    def ranked_candidates(self, company_name: str, city: str = "") -> list[dict]:
+        candidates = self.search(company_name, city)
         candidates.sort(
             key=lambda c: self.score(company_name, c),
             reverse=True
         )
-
-        return self.clean_url(candidates[0]["url"])
+        return candidates

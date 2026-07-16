@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QSizePolicy,
 )
+from models.value_utils import display_value
 
 
 class DetailPanel(QWidget):
@@ -24,6 +25,9 @@ class DetailPanel(QWidget):
     crm_history_requested = Signal()
     maps_requested = Signal()
     follow_up_done_requested = Signal()
+    enrichment_requested = Signal(bool)
+    enrichment_details_requested = Signal()
+    enrichment_url_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -122,6 +126,46 @@ class DetailPanel(QWidget):
         layout.addWidget(self.btn_follow_up_done)
         layout.addWidget(self.btn_maps)
 
+        analysis_group = QGroupBox("Websiteanalyse")
+        analysis_form = QFormLayout(analysis_group)
+        analysis_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        analysis_form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        self.enrichment_score = QLabel("–")
+        self.enrichment_https = QLabel("–")
+        self.enrichment_legal = QLabel("–")
+        self.enrichment_contact = QLabel("–")
+        self.enrichment_hours = QLabel("–")
+        self.enrichment_industry = QLabel("–")
+        self.enrichment_social = QLabel("–")
+        self.enrichment_description = QLabel("–")
+        self.enrichment_analyzed_at = QLabel("–")
+        for label in (self.enrichment_score, self.enrichment_https, self.enrichment_legal,
+                      self.enrichment_contact, self.enrichment_hours, self.enrichment_industry,
+                      self.enrichment_social, self.enrichment_description, self.enrichment_analyzed_at):
+            label.setWordWrap(True); label.setMinimumWidth(0); label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        analysis_form.addRow("Score:", self.enrichment_score)
+        analysis_form.addRow("HTTPS / SSL:", self.enrichment_https)
+        analysis_form.addRow("Impressum / Datenschutz:", self.enrichment_legal)
+        analysis_form.addRow("Kontaktseite / Formular:", self.enrichment_contact)
+        analysis_form.addRow("Öffnungszeiten:", self.enrichment_hours)
+        analysis_form.addRow("Branche:", self.enrichment_industry)
+        analysis_form.addRow("Social Media:", self.enrichment_social)
+        analysis_form.addRow("Kurzbeschreibung:", self.enrichment_description)
+        analysis_form.addRow("Analysiert:", self.enrichment_analyzed_at)
+        layout.addWidget(analysis_group)
+        self.btn_enrich = QPushButton("Website analysieren")
+        self.btn_enrich_refresh = QPushButton("Analyse erneut durchführen")
+        self.btn_enrichment_details = QPushButton("Analysedetails")
+        self.btn_open_imprint = QPushButton("Impressum öffnen")
+        self.btn_open_privacy = QPushButton("Datenschutz öffnen")
+        self.btn_enrich.clicked.connect(lambda: self.enrichment_requested.emit(False))
+        self.btn_enrich_refresh.clicked.connect(lambda: self.enrichment_requested.emit(True))
+        self.btn_enrichment_details.clicked.connect(self.enrichment_details_requested)
+        self.btn_open_imprint.clicked.connect(lambda: self.enrichment_url_requested.emit(self.btn_open_imprint.property("url") or ""))
+        self.btn_open_privacy.clicked.connect(lambda: self.enrichment_url_requested.emit(self.btn_open_privacy.property("url") or ""))
+        for button in (self.btn_enrich, self.btn_enrich_refresh, self.btn_enrichment_details, self.btn_open_imprint, self.btn_open_privacy):
+            layout.addWidget(button)
+
         self.btn_check = QPushButton("🔍 Firma prüfen")
         self.btn_bulk = QPushButton("▶ Alle Firmen prüfen")
         self.btn_export = QPushButton("📤 Export")
@@ -134,23 +178,21 @@ class DetailPanel(QWidget):
 
     def set_customer(self, customer: dict):
 
-        self.company.setText(
-            str(customer.get("KUNDENNAME", "-"))
-        )
+        self.company.setText(display_value(customer.get("KUNDENNAME"), "–"))
 
         self.city.setText(
-            str(customer.get("CITY", "-"))
+            display_value(customer.get("CITY"), "–")
         )
 
         self.phone.setText(
-            str(customer.get("TELEFON", "-"))
+            display_value(customer.get("TELEFON"), "–")
         )
 
         self.email.setText(
-            str(customer.get("EMAIL", "-"))
+            display_value(customer.get("EMAIL"), "–")
         )
 
-        website = str(customer.get("WEBSITE", ""))
+        website = display_value(customer.get("WEBSITE"))
         self.website.setToolTip(website)
 
         if website:
@@ -163,11 +205,12 @@ class DetailPanel(QWidget):
 
             self.website.setText("-")
 
-        status = str(customer.get("STATUS", "-"))
+        status = display_value(customer.get("STATUS"), "–")
 
         self.status.setText(status)
 
         self.set_crm_data(customer)
+        self.set_enrichment_data(customer)
 
         if status.lower() == "vollständig":
 
@@ -209,10 +252,10 @@ class DetailPanel(QWidget):
             "next_follow_up_at": self.next_follow_up_at,
         }
         for key, widget in fields.items():
-            widget.setText(str(data.get(key, "") or ""))
-        self.notes.setPlainText(str(data.get("notes", "") or ""))
-        self.customer_stage.setCurrentText(str(data.get("customer_stage", "Interessent") or "Interessent"))
-        self.priority.setCurrentText(str(data.get("priority", "Normal") or "Normal"))
+            widget.setText(display_value(data.get(key)))
+        self.notes.setPlainText(display_value(data.get("notes")))
+        self.customer_stage.setCurrentText(display_value(data.get("customer_stage"), "Interessent"))
+        self.priority.setCurrentText(display_value(data.get("priority"), "Normal"))
 
     def _emit_crm_data(self):
         self.crm_save_requested.emit({
@@ -230,14 +273,44 @@ class DetailPanel(QWidget):
 
     def clear(self):
 
-        self.company.setText("-")
-        self.city.setText("-")
-        self.phone.setText("-")
-        self.email.setText("-")
-        self.website.setText("-")
+        self.company.setText("–")
+        self.city.setText("–")
+        self.phone.setText("–")
+        self.email.setText("–")
+        self.website.setText("–")
         self.website.setToolTip("")
-        self.status.setText("-")
+        self.status.setText("–")
         self.set_crm_data(None)
+        self.set_enrichment_data(None)
+
+    def set_enrichment_data(self, data):
+        data = data or {}
+        getter = data.get if isinstance(data, dict) else lambda key, default=None: getattr(data, key, default)
+        score = getter("WEBSITE_SCORE", getter("website_score", ""))
+        category = getter("WEBSITE_SCORE_CATEGORY", getter("website_score_category", ""))
+        self.enrichment_score.setText(f"{score}/100 – {category}" if score != "" else "–")
+        https = getter("HAS_HTTPS", getter("has_https", False)); ssl_valid = getter("SSL_VALID", getter("ssl_valid", False))
+        self.enrichment_https.setText(f"HTTPS: {'Ja' if https else 'Nein'} | SSL: {'Gültig' if ssl_valid else 'Nein/ungeprüft'}")
+        imprint = getter("HAS_IMPRINT", getter("has_imprint", False)); privacy = getter("HAS_PRIVACY_POLICY", getter("has_privacy_policy", False))
+        self.enrichment_legal.setText(f"Impressum: {'Ja' if imprint else 'Nein'} | Datenschutz: {'Ja' if privacy else 'Nein'}")
+        contact = getter("HAS_CONTACT_PAGE", getter("has_contact_page", False)); form = getter("CONTACT_FORM_URL", getter("contact_form_url", ""))
+        self.enrichment_contact.setText(f"Kontaktseite: {'Ja' if contact else 'Nein'} | Formular: {'Ja' if form else 'Nein'}")
+        hours = getter("OPENING_HOURS", "")
+        if not hours and not isinstance(data, dict): hours = data.opening_hours.display_text()
+        self.enrichment_hours.setText(display_value(hours, "–"))
+        industry = getter("INDUSTRY", "")
+        confidence = getter("INDUSTRY_CONFIDENCE", "")
+        if not industry and not isinstance(data, dict): industry, confidence = data.industry.industry, data.industry.confidence
+        self.enrichment_industry.setText(f"{industry} ({float(confidence):.0%})" if industry and confidence != "" else display_value(industry, "–"))
+        social = getter("SOCIAL_MEDIA", "")
+        if not social and not isinstance(data, dict): social = ", ".join(data.social_media.active_platforms())
+        self.enrichment_social.setText(display_value(social, "–"))
+        self.enrichment_description.setText(display_value(getter("SHORT_DESCRIPTION", getter("short_description", "")), "–"))
+        self.enrichment_analyzed_at.setText(display_value(getter("ANALYZED_AT", getter("analyzed_at", "")), "–"))
+        imprint_url = getter("IMPRINT_URL", getter("imprint_url", "")); privacy_url = getter("PRIVACY_URL", getter("privacy_url", ""))
+        self.btn_open_imprint.setProperty("url", imprint_url); self.btn_open_imprint.setEnabled(bool(imprint_url))
+        self.btn_open_privacy.setProperty("url", privacy_url); self.btn_open_privacy.setEnabled(bool(privacy_url))
+        self.btn_enrichment_details.setEnabled(bool(score != ""))
 
     def open_website(self, url):
 

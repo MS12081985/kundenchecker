@@ -12,6 +12,13 @@ installiert; die Installation erfolgt weiterhin manuell.
 
 Die Anwendung dient dazu, Kundendaten aus Excel-Dateien einzulesen, zu durchsuchen, Dubletten zu erkennen und Firmen automatisch im Internet zu recherchieren.
 
+Vor der Übernahme prüft KundenChecker Excel-Dateien auf fehlende Pflichtwerte,
+ungültige Kontaktdaten und Dubletten. Identische und sichere ergänzende
+Datensätze können nach Bestätigung bereinigt werden. Die Originaldatei bleibt
+unverändert; optional wird eine neue `_bereinigt.xlsx`-Datei mit Importbericht
+gespeichert. Das Dashboard zeigt einen transparent berechneten
+Datenqualitäts-Score.
+
 ---
 
 # Funktionen
@@ -103,7 +110,7 @@ python app.py
 
 Aktuelle Version:
 
-**v1.2.2**
+**v1.3.0**
 
 ---
 
@@ -179,7 +186,7 @@ Automatisierte Tests:
 ## macOS-App
 
 Der lokale Build erzeugt mit `scripts/build_macos.sh` eine nicht signierte
-`dist/KundenChecker.app` und `release/KundenChecker-1.0.0.dmg`. Beim ersten
+`dist/KundenChecker.app` und `release/KundenChecker-1.3.0.dmg`. Beim ersten
 Start kann macOS einen Sicherheitshinweis anzeigen; dann per Rechtsklick →
 Öffnen starten. Für die lokale App gelten die Hinweise in `BUILDING.md`.
 ## CRM und Google Maps (1.2.0)
@@ -227,3 +234,24 @@ geladen.
 
 Vollständig identische Excel-Dubletten ohne getrennte Datenbank-IDs können
 erkannt werden, aber nicht immer automatisch zusammengeführt werden.
+
+## Kostenlose Websiteanalyse (1.3.0)
+
+KundenChecker analysiert auf Wunsch die bereits sicher zugeordnete offizielle
+Firmenwebsite. Die begrenzte Analyse erkennt technische und inhaltliche Signale
+wie HTTPS/TLS, Impressum, Datenschutz, Kontaktseite, Kontaktformular,
+Öffnungszeiten, Social-Media-Profile und strukturierte Daten. Daraus entstehen
+ein transparenter Website-Score, eine regelbasierte Branchenzuordnung und eine
+kurze, lokal erzeugte Beschreibung. Die Anreicherungsfelder können im
+Kundenexport ein- oder ausgeschlossen werden.
+
+Die Funktion verwendet keine kostenpflichtige API und keine Cloud-KI. Es werden
+keine Kundendaten an einen KI-Anbieter übertragen, keine Google-Bewertungen
+abgerufen und weder Google Maps noch Social-Media-Plattformen gescrapt. Grundlage
+sind ausschließlich öffentlich sichtbare Angaben der jeweiligen Firmenwebsite.
+Die Kernfunktionen der Anwendung bleiben ohne KI-Anbieter und offline nutzbar;
+für eine neue Websiteanalyse ist naturgemäß ein Internetzugang erforderlich.
+
+Automatische Erkennungen können unvollständig sein. Website-Score, Impressums-
+und Datenschutzerkennung sind weder eine rechtliche Bewertung noch eine Garantie
+für Konformität, Qualität oder geschäftlichen Erfolg.

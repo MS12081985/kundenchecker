@@ -80,6 +80,7 @@ def main():
 
     try:
         from loguru import logger
+        from config.app_config import AppConfig
         AppConfig.LOG_DIR.mkdir(parents=True, exist_ok=True)
         logger.add(AppConfig.LOG_FILE, rotation="1 MB", retention=3, encoding="utf-8")
 

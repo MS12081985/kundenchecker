@@ -42,7 +42,7 @@ class Toolbar(QWidget):
         self.btn_bulk = QPushButton("▶ Alle Firmen prüfen")
         self.btn_marked_refresh = QPushButton("🔄 Markierte erneut prüfen")
         self.btn_inactive_refresh = QPushButton("🔄 Nicht aktive erneut prüfen")
-        self.btn_duplicate = QPushButton("🧾 Dubletten")
+        self.btn_duplicate = QPushButton("🧾 Datenbank-Dubletten")
         self.btn_export = QPushButton("📤 Export")
 
         buttons = (
@@ -52,7 +52,7 @@ class Toolbar(QWidget):
             (self.btn_bulk, "Alle Firmen prüfen"),
             (self.btn_marked_refresh, "Markierte Firmen erneut prüfen"),
             (self.btn_inactive_refresh, "Nicht aktive Firmen erneut prüfen"),
-            (self.btn_duplicate, "Dubletten finden"),
+            (self.btn_duplicate, "Datenbank-Dubletten zusammenführen"),
             (self.btn_export, "Aktuelle Tabelle exportieren"),
         )
         for button, tooltip in buttons:

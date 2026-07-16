@@ -27,15 +27,16 @@ class CustomerExportDialog(QDialog):
         self.format = QComboBox(); self.format.addItem("Excel (*.xlsx)", "xlsx"); self.format.addItem("CSV (*.csv)", "csv")
         index = self.format.findData(default_format); self.format.setCurrentIndex(max(0, index))
         self.include_crm = QCheckBox("CRM-Felder einschließen"); self.include_crm.setChecked(True)
-        form.addRow("Datenumfang:", self.scope); form.addRow("Dateiformat:", self.format); form.addRow("", self.include_crm); layout.addLayout(form)
+        self.include_enrichment = QCheckBox("Websiteanalyse einschließen"); self.include_enrichment.setChecked(True)
+        form.addRow("Datenumfang:", self.scope); form.addRow("Dateiformat:", self.format); form.addRow("", self.include_crm); form.addRow("", self.include_enrichment); layout.addLayout(form)
         self.counts = QLabel(); self.counts.setWordWrap(True); layout.addWidget(self.counts)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.buttons.button(QDialogButtonBox.Ok).setText("Exportieren")
         self.buttons.accepted.connect(self._accept); self.buttons.rejected.connect(self.reject); layout.addWidget(self.buttons)
-        self.scope.currentIndexChanged.connect(self._emit_options); self.include_crm.toggled.connect(self._emit_options)
+        self.scope.currentIndexChanged.connect(self._emit_options); self.include_crm.toggled.connect(self._emit_options); self.include_enrichment.toggled.connect(self._emit_options)
 
     def options(self):
-        return {"scope": self.scope.currentData(), "format": self.format.currentData(), "include_crm": self.include_crm.isChecked(), "include_technical": False}
+        return {"scope": self.scope.currentData(), "format": self.format.currentData(), "include_crm": self.include_crm.isChecked(), "include_enrichment": self.include_enrichment.isChecked(), "include_technical": False}
 
     def showEvent(self, event):
         super().showEvent(event); self._emit_options()

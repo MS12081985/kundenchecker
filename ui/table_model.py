@@ -4,7 +4,8 @@ from PySide6.QtCore import (
     QModelIndex
 )
 from PySide6.QtGui import QColor
-import math
+from models.value_utils import clean_missing
+from models.address_utils import POSTAL_CODE_COLUMNS, normalize_postal_code
 
 
 class CustomerTableModel(QAbstractTableModel):
@@ -72,17 +73,14 @@ class CustomerTableModel(QAbstractTableModel):
             index.column()
         ]
 
-        if value is None or (isinstance(value, float) and math.isnan(value)):
-            return ""
-
-        return str(value)
+        column = str(self._df.columns[index.column()]).upper()
+        return normalize_postal_code(value) if column in POSTAL_CODE_COLUMNS else clean_missing(value)
 
     def data(self, index, role=Qt.DisplayRole):
         if role == Qt.ToolTipRole and index.isValid() and self._df is not None:
             value = self._df.iat[index.row(), index.column()]
-            if value is None or (isinstance(value, float) and math.isnan(value)):
-                return ""
-            return str(value)
+            column = str(self._df.columns[index.column()]).upper()
+            return normalize_postal_code(value) if column in POSTAL_CODE_COLUMNS else clean_missing(value)
         return self._data(index, role)
 
     def headerData(
@@ -118,3 +116,16 @@ class CustomerTableModel(QAbstractTableModel):
             return None
 
         return self._df.iloc[row]
+
+    def notify_rows_changed(self, rows, columns):
+        if self._df is None or not rows or not columns:
+            return
+        positions = [self._df.columns.get_loc(column) for column in columns if column in self._df.columns]
+        if not positions:
+            return
+        first_column, last_column = min(positions), max(positions)
+        for row in sorted(set(int(value) for value in rows if 0 <= int(value) < len(self._df))):
+            self.dataChanged.emit(
+                self.index(row, first_column), self.index(row, last_column),
+                [Qt.DisplayRole, Qt.ForegroundRole, Qt.ToolTipRole],
+            )
